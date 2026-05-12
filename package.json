@@ -1,0 +1,27 @@
+{
+  "name": "harness-template",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "agent": "tsx agent.ts",
+    "agent:coder": "tsx agent.ts --runner coder",
+    "agent:reviewer": "tsx agent.ts --runner reviewer",
+    "agent:dispatch": "tsx agent.ts --runner dispatcher",
+    "agent:loop": "tsx agent.ts --runner dispatcher --loop",
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "keywords": [],
+  "author": "Siykt",
+  "license": "MIT",
+  "packageManager": "pnpm@10.28.2",
+  "devDependencies": {
+    "@sindresorhus/tsconfig": "^8.1.0",
+    "@types/node": "^25.7.0",
+    "citty": "^0.2.2",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}

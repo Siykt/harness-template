@@ -1,0 +1,77 @@
+# compiled output
+/dist
+/node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# Tests
+/coverage
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# dotenv environment variables file
+.env
+.env.test
+
+.eslintcache
+database.db
+
+# Prisma generated files (auto-generated on `prisma generate`)
+prisma/generated/
+
+# OpenClaw workspace files (AI assistant config, not project code)
+AGENTS.md
+SOUL.md
+IDENTITY.md
+USER.md
+TOOLS.md
+HEARTBEAT.md
+BOOTSTRAP.md
+MEMORY.md
+memory/
+.openclaw/
+
+# Runtime state
+runtime/
+tmp/
+data/*lock*
+data/*.jsonl
+data/*.db
+data/*.lock
+data/bot-analysis-*.json
+data/bonereaper-regime-matrix.json
+data/bonereaper-inventory-signature.json
+data/bonereaper-taker-trigger-probe.json
+data/bonereaper-taker-coverage-sweep.json
+data/bonereaper-spec-vs-strategy-backtest.json
+data/book-stream/*.jsonl
+scripts/test-sell-*.ts
+
+__pycache__/
+*.py[cod]
+*$py.class
