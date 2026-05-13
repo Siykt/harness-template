@@ -12,6 +12,68 @@
 
 ## 会话记录
 
+### Session 2026-05-13 HT-001 agent provider split
+
+- 日期：2026-05-13
+- 本轮目标：实现 `HT-001`，拆分 agent bin 与 agent provider 命名；完成后按 coder contract 将状态更新为 `pending_review`。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`da1b6b7 chore: add agent.ts need scripts`、`9ebfd0c chore: register v0.1 feature specs`、`99b1b94 fix: 补充AGENTS.md`、`97820f1 docs: add project readme`、`e33422c init`
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  4 passed (4)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：选定唯一 active feature `HT-001`；进入实现前将 `feature_list.json` 中 `HT-001.status` 从 `not_started` 改为 `in_progress`。
+  - Layer 2：读取 `docs/features/HT-001-agent-bin-split.md`。
+- 已完成：
+  - 新增 `agent-providers.ts`：定义 TypeScript provider registry，包含 `codex`、`claude`、`openharness`、`kimi`、`gemini`；codex provider 构建当前 `codex exec` 命令，其他 provider 返回明确 unsupported stub。
+  - 新增 `agent/providers.py`：为 Python 启动器提供同语义 provider registry 和 command builder。
+  - 更新 `agent.ts`：新增 `--agent-provider`、`--agent-bin`；保留 `--codex-bin` 和 `--oh-bin` 为 codex legacy alias；dry-run 输出 provider-neutral `agentProvider` / `agentBin`；通用执行路径改由 provider command builder 负责。
+  - 更新 `agent/core.py`、`agent/constants.py`、`agent/models.py`：Python 启动器同步 provider-neutral 选项和 command builder；修复根 `agent.py` 入口导入路径为 `agent.core`。
+  - 更新 `tests/setup.test.ts`：覆盖 provider 列表、codex provider 命令路径、unsupported provider stub、默认 `--agent-bin` 语义和 `--codex-bin` legacy alias。
+  - 更新 `README.md` 和 `docs/features/HT-001-agent-bin-split.md`：记录 provider 注册表、`--agent-provider` / `--agent-bin`、legacy alias 和 todo 完成状态。
+  - 更新 `feature_list.json`：`HT-001.status` 改为 `pending_review`，并记录验证 evidence；未标记为 `passing`，等待 reviewer 验收。
+- 运行过的验证：
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`，`Tests  5 passed (5)`。
+  - `pnpm build`：PASS；`ESM Build success in 5ms`（最终 clean-state 复跑为 `ESM Build success in 6ms`）。
+  - `pnpm agent -- --task "smoke" --dry-run`：PASS；输出 `agentProvider=codex agentBin=codex`，并生成 `docs/plans/plan-2026-05-13-coder-004.md`，命令为 `codex "--ask-for-approval" "never" "exec" ...`。
+  - `python3 -m agent --task smoke --dry-run --skip-init`：PASS；输出 `agentProvider=codex agentBin=codex`，Python provider-neutral 路径可用。
+  - `python3 agent.py --task smoke --dry-run --skip-init`：PASS；根入口可用，输出 `agentProvider=codex agentBin=codex`。
+  - `rg "codexBin|--codex-bin|Codex" -n`：PASS；剩余结果仅在 codex provider、legacy alias 测试/兼容说明、README/feature 文档和 Codex runner prompt 文案中。
+- 基础 smoke/e2e 路径检查：
+  - 当前项目仍无独立 e2e 路径；基础 smoke 以 `./init.sh`、`pnpm test`、`pnpm agent -- --task "smoke" --dry-run` 覆盖，结果 PASS。
+- 更新过的文件或工件：
+  - `agent-providers.ts`：新增 TypeScript provider registry 和 command builder。
+  - `agent/providers.py`：新增 Python provider registry 和 command builder。
+  - `agent.ts`：迁移为 provider-neutral CLI 和执行路径。
+  - `agent/core.py`、`agent/constants.py`、`agent/models.py`、`agent.py`：Python 启动器同步 provider-neutral 行为并修复入口。
+  - `tests/setup.test.ts`：新增 provider registry / codex command path 测试。
+  - `README.md`：更新 provider 与 CLI 参数说明。
+  - `docs/features/HT-001-agent-bin-split.md`：todo 状态更新为 `done`。
+  - `feature_list.json`：`HT-001` 进入 `pending_review` 并补充 evidence。
+  - `claude-progress.md`：记录本轮修改、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - `claude`、`openharness`、`kimi`、`gemini` 仅登记为 provider，按本 feature 要求不实现执行能力；调用时会明确报 unsupported。
+  - `./init.sh` 中 pnpm 提示 `Ignored build scripts: esbuild@0.27.7`，未影响测试或构建。
+  - dry-run 验证会生成 `docs/plans/plan-2026-05-13-coder-002.md` 到 `005.md`；这些为启动器计划输出工件，当前未纳入 git 跟踪。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，provider registry、provider-neutral bin 参数、codex command builder、unsupported stubs 和 legacy alias 均已实现。
+  - 验证：2/2，已运行 `pnpm test`、`pnpm build`、TypeScript dry-run、Python module dry-run、Python root wrapper dry-run 和 grep 范围检查。
+  - 范围纪律：2/2，仅围绕 `HT-001` 修改 agent 启动器、provider 模块、相关测试和文档。
+  - 可靠性：2/2，默认 codex dry-run 和 Python/TypeScript路径均可重跑，feature 状态与 evidence 已记录。
+  - 可维护性：2/2，provider 逻辑拆成小模块，非 codex provider 的 unsupported 行为显式。
+  - 交接准备度：2/2，下一轮 reviewer 可直接依据 `feature_list.json` evidence 和本记录验收。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  5 passed (5)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 6ms`。
+  - PASS 本轮变更已 git commit：`git log --oneline -1` 输出 `7bb3260 feat: split agent provider bin handling`。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-001.status` 为 `pending_review`，未提前标记 `passing`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；非 codex provider 明确为 unsupported stub。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 运行 reviewer 接受门：`pnpm agent:reviewer -- --feature HT-001 --dry-run` 或直接审查本轮 diff 与 evidence；若接受，将 `HT-001` 从 `pending_review` 更新为 `passing` 并记录 reviewer evidence。
+
 ### Session 2026-05-13 V0.1 feature specs
 
 - 日期：2026-05-13

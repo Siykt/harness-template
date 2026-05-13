@@ -14,7 +14,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .constants import (
-    DEFAULT_CODEX_BIN,
+    DEFAULT_AGENT_BIN,
+    DEFAULT_AGENT_PROVIDER,
     DEFAULT_CODER_EFFORT,
     DEFAULT_CODER_MODEL,
     DEFAULT_CODER_TEMPERATURE,
@@ -29,6 +30,7 @@ from .constants import (
     REQUIRED_ROOT_FILES,
 )
 from .models import (
+    AgentProviderId,
     CliOptions,
     CommandResult,
     DispatchDecision,
@@ -37,6 +39,7 @@ from .models import (
     RunnerExecMode,
     RunnerConfig,
 )
+from .providers import AGENT_PROVIDERS, build_provider_command, resolve_agent_provider
 
 
 def is_known_cli_flag(arg: str) -> bool:
@@ -84,7 +87,7 @@ def parse_non_negative_int(value: str, option_name: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Codex dispatcher for repository feature work.")
+    parser = argparse.ArgumentParser(description="Agent dispatcher for repository feature work.")
     parser.add_argument("task_parts", nargs="*")
     parser.add_argument("--task", "-t", default=None)
     parser.add_argument("--feature", "-f", default=None)
@@ -101,7 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-turns", default=DEFAULT_MAX_TURNS)
     parser.add_argument("--permission-mode", default=DEFAULT_PERMISSION_MODE)
     parser.add_argument("--name", "-n", default=None)
-    parser.add_argument("--codex-bin", default=DEFAULT_CODEX_BIN)
+    parser.add_argument("--agent-provider", choices=list(AGENT_PROVIDERS.keys()), default=DEFAULT_AGENT_PROVIDER)
+    parser.add_argument("--agent-bin", default=None)
+    parser.add_argument("--codex-bin", default=None, help="Legacy alias for --agent-bin with --agent-provider codex.")
     parser.add_argument("--oh-bin", default=None)
     parser.add_argument("--plan-dir", default="docs/plans")
     parser.add_argument("--layer2-ref", action="append", default=[])
@@ -122,18 +127,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def to_cli_options(parsed: argparse.Namespace, raw_cli_args: list[str], extra_codex_args: list[str]) -> CliOptions:
+def to_cli_options(parsed: argparse.Namespace, raw_cli_args: list[str], extra_agent_args: list[str]) -> CliOptions:
     task = (parsed.task if isinstance(parsed.task, str) else "") or " ".join(parsed.task_parts)
     task = task.strip()
     runner = parsed.runner
     if not task and runner != "dispatcher":
         raise ValueError('Missing task. Use --task "..." or pass the task as trailing args.')
 
-    codex_bin = (
-        collect_last_value(raw_cli_args, "--codex-bin")
-        or collect_last_value(raw_cli_args, "--oh-bin")
-        or parsed.codex_bin
-        or DEFAULT_CODEX_BIN
+    agent_provider: AgentProviderId = resolve_agent_provider(str(parsed.agent_provider or DEFAULT_AGENT_PROVIDER))
+    legacy_bin = collect_last_value(raw_cli_args, "--codex-bin") or collect_last_value(raw_cli_args, "--oh-bin")
+    if legacy_bin and agent_provider != "codex":
+        raise ValueError("Legacy --codex-bin/--oh-bin aliases are only valid with --agent-provider codex. Use --agent-bin instead.")
+
+    agent_bin = (
+        collect_last_value(raw_cli_args, "--agent-bin")
+        or legacy_bin
+        or parsed.agent_bin
+        or AGENT_PROVIDERS[agent_provider].default_bin
+        or DEFAULT_AGENT_BIN
     )
 
     return CliOptions(
@@ -152,7 +163,8 @@ def to_cli_options(parsed: argparse.Namespace, raw_cli_args: list[str], extra_co
         max_turns=str(parsed.max_turns),
         permission_mode=str(parsed.permission_mode),
         name=parsed.name,
-        codex_bin=codex_bin,
+        agent_provider=agent_provider,
+        agent_bin=agent_bin,
         plan_dir=str(parsed.plan_dir),
         layer2_refs=collect_repeated_values(raw_cli_args, "--layer2-ref"),
         dry_run=bool(parsed.dry_run),
@@ -164,7 +176,7 @@ def to_cli_options(parsed: argparse.Namespace, raw_cli_args: list[str], extra_co
         resume=parsed.resume,
         output_format=parsed.output_format,
         dangerously_skip_permissions=bool(parsed.dangerously_skip_permissions),
-        extra_codex_args=extra_codex_args,
+        extra_agent_args=extra_agent_args,
     )
 
 
@@ -521,44 +533,12 @@ exit={git_log.exit_code}
 Perform the user task now. Be autonomous: inspect only the files needed, implement changes, verify, update progress/tracker, and commit when appropriate."""
 
 
-def build_codex_instruction(cwd: Path, plan_path: Path) -> str:
+def build_provider_instruction(cwd: Path, plan_path: Path) -> str:
     relative_path = str(plan_path.relative_to(cwd))
     return (
         f"Read {relative_path} and execute the plan exactly. "
         "Use that file as the full prompt/context; do not ask me to paste it again."
     )
-
-
-def build_codex_args(opts: CliOptions, cwd: Path, instruction: str) -> list[str]:
-    args: list[str] = ["exec"]
-
-    if opts.continue_session or opts.resume:
-        args.append("resume")
-        if opts.continue_session and not opts.resume:
-            args.append("--last")
-        if opts.resume:
-            args.append(opts.resume)
-    else:
-        args.extend(["--cd", str(cwd)])
-        if opts.permission_mode == DEFAULT_PERMISSION_MODE:
-            args.extend(["--sandbox", "danger-full-access"])
-            args = ["--ask-for-approval", "never", *args]
-
-    if opts.model:
-        args.extend(["--model", opts.model])
-    if opts.output_format == "json":
-        args.append("--json")
-    elif opts.output_format:
-        raise ValueError(
-            f"Unsupported Codex output format: {opts.output_format}. "
-            "Use --output-format json or pass raw Codex args after --."
-        )
-    if opts.dangerously_skip_permissions:
-        args.append("--dangerously-bypass-approvals-and-sandbox")
-
-    args.extend(opts.extra_codex_args)
-    args.append(instruction)
-    return args
 
 
 def runner_defaults(opts: CliOptions, runner: str) -> RunnerConfig:
@@ -666,8 +646,21 @@ async def run_harness(
 
     runner_opts = with_runner_config(opts, runner_config)
     plan_path = write_plan_file(cwd, opts.plan_dir, prompt, runner_config.runner)
-    codex_instruction = build_codex_instruction(cwd, plan_path)
-    codex_args = build_codex_args(runner_opts, cwd, codex_instruction)
+    provider_instruction = build_provider_instruction(cwd, plan_path)
+    provider_command = build_provider_command(
+        provider=runner_opts.agent_provider,
+        agent_bin=runner_opts.agent_bin,
+        permission_mode=runner_opts.permission_mode,
+        default_permission_mode=DEFAULT_PERMISSION_MODE,
+        model=runner_opts.model,
+        output_format=runner_opts.output_format,
+        dangerously_skip_permissions=runner_opts.dangerously_skip_permissions,
+        continue_session=runner_opts.continue_session,
+        resume=runner_opts.resume,
+        cwd=cwd,
+        instruction=provider_instruction,
+        extra_agent_args=runner_opts.extra_agent_args,
+    )
 
     if opts.dry_run:
         selected_feature = context["selected_feature"]
@@ -677,25 +670,27 @@ async def run_harness(
             f"model={runner_config.model or '-'} effort={runner_config.effort or '-'} "
             f"temperature={runner_config.temperature}"
         )
+        print(f"[agent.py] agentProvider={runner_opts.agent_provider} agentBin={runner_opts.agent_bin}")
         print(
             f"[agent.py] selectedFeature={selected_feature.id if selected_feature else 'none'} "
             f"status={selected_feature.status if selected_feature else '-'}"
         )
         print(f"[agent.py] layer2={', '.join(doc['path'] for doc in context['layer2'])}")
         print(f"[agent.py] plan={plan_path.relative_to(cwd)}")
-        encoded = " ".join(json.dumps(arg) for arg in codex_args)
-        print(f"[agent.py] command={opts.codex_bin} {encoded}")
-        print("\nPrompt written to the plan file above. Re-run without --dry-run to launch Codex.")
+        encoded = " ".join(json.dumps(arg) for arg in provider_command.args)
+        print(f"[agent.py] command={Path(provider_command.command).name} {encoded}")
+        print("\nPrompt written to the plan file above. Re-run without --dry-run to launch the selected provider.")
         return 0
 
     selected_feature = context["selected_feature"]
     print(f"[agent.py] wrote plan {plan_path.relative_to(cwd)}")
     print(
-        f"[agent.py] launching {Path(opts.codex_bin).name} "
+        f"[agent.py] launching {Path(provider_command.command).name} "
+        f"provider={runner_opts.agent_provider} "
         f"runner={runner_config.runner} feature={selected_feature.id if selected_feature else 'none'} "
         f"with {len(context['layer2'])} routed docs"
     )
-    return await spawn_codex(opts.codex_bin, codex_args, cwd)
+    return await spawn_codex(provider_command.command, provider_command.args, cwd)
 
 
 async def run_dispatcher_once(opts: CliOptions, cwd: Path, iteration: int | None = None) -> DispatcherRunResult:
@@ -800,10 +795,10 @@ async def run_with_options(opts: CliOptions) -> int:
 
 
 def parse_options(raw_argv: list[str]) -> CliOptions:
-    parsed_cli_args, extra_codex_args = split_forwarded_args(raw_argv)
+    parsed_cli_args, extra_agent_args = split_forwarded_args(raw_argv)
     parser = build_parser()
     parsed = parser.parse_args(parsed_cli_args)
-    return to_cli_options(parsed, parsed_cli_args, extra_codex_args)
+    return to_cli_options(parsed, parsed_cli_args, extra_agent_args)
 
 
 async def async_main(raw_argv: list[str] | None = None) -> int:

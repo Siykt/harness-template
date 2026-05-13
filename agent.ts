@@ -4,6 +4,13 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { type ArgsDef, defineCommand, parseArgs as parseCittyArgs, type ParsedArgs, runMain } from 'citty';
+import {
+  agentProviders,
+  buildProviderCommand,
+  formatProviderCommand,
+  resolveAgentProvider,
+  type AgentProviderId
+} from './agent-providers';
 
 interface FeatureSummary {
   id: string;
@@ -36,7 +43,8 @@ interface DispatcherRunResult {
 
 const DEFAULT_MAX_TURNS = '40';
 const DEFAULT_PERMISSION_MODE = 'full_auto';
-const DEFAULT_CODEX_BIN = 'codex';
+const DEFAULT_AGENT_PROVIDER: AgentProviderId = 'codex';
+const DEFAULT_AGENT_BIN = agentProviders[DEFAULT_AGENT_PROVIDER].defaultBin;
 const DEFAULT_LOOP_DELAY_MS = '1000';
 const DEFAULT_MAX_LOOP_ITERATIONS = '0';
 const DEFAULT_CODER_MODEL = 'gpt-5.5';
@@ -64,7 +72,8 @@ interface CliOptions {
   maxTurns: string;
   permissionMode: string;
   name?: string;
-  codexBin: string;
+  agentProvider: AgentProviderId;
+  agentBin: string;
   planDir: string;
   layer2Refs: string[];
   dryRun: boolean;
@@ -76,7 +85,7 @@ interface CliOptions {
   resume?: string;
   outputFormat?: string;
   dangerouslySkipPermissions: boolean;
-  extraCodexArgs: string[];
+  extraAgentArgs: string[];
 }
 
 interface RunnerConfig {
@@ -90,7 +99,7 @@ const cliArgs = {
   task: {
     type: 'string',
     alias: 't',
-    description: 'Task for the Codex agent. Optional for dispatcher auto-discovery.'
+    description: 'Task for the selected agent provider. Optional for dispatcher auto-discovery.'
   },
   feature: {
     type: 'string',
@@ -114,7 +123,7 @@ const cliArgs = {
   },
   temperature: {
     type: 'string',
-    description: 'Recorded in the plan; Codex CLI has no temperature flag.'
+    description: 'Recorded in the plan; current Codex provider has no temperature flag.'
   },
   'coder-model': {
     type: 'string',
@@ -143,26 +152,35 @@ const cliArgs = {
   'max-turns': {
     type: 'string',
     default: DEFAULT_MAX_TURNS,
-    description: 'Recorded in the plan; Codex CLI has no max-turns flag.'
+    description: 'Recorded in the plan; current Codex provider has no max-turns flag.'
   },
   'permission-mode': {
     type: 'string',
     default: DEFAULT_PERMISSION_MODE,
-    description: 'Compatibility mode. full_auto maps to Codex danger-full-access + approval never.'
+    description: 'Compatibility mode. full_auto maps to provider-specific full-auto execution when supported.'
   },
   name: {
     type: 'string',
     alias: 'n',
-    description: 'Compatibility metadata; Codex exec does not use session names.'
+    description: 'Compatibility metadata; current provider execution does not use session names.'
+  },
+  'agent-provider': {
+    type: 'enum',
+    options: [...Object.keys(agentProviders)],
+    default: DEFAULT_AGENT_PROVIDER,
+    description: `Agent provider. Default: ${DEFAULT_AGENT_PROVIDER}.`
+  },
+  'agent-bin': {
+    type: 'string',
+    description: `Agent executable. Default follows --agent-provider; codex defaults to ${DEFAULT_AGENT_BIN}.`
   },
   'codex-bin': {
     type: 'string',
-    default: DEFAULT_CODEX_BIN,
-    description: 'Codex executable.'
+    description: 'Legacy alias for --agent-bin when --agent-provider codex is used.'
   },
   'oh-bin': {
     type: 'string',
-    description: 'Deprecated alias for --codex-bin.'
+    description: 'Deprecated legacy alias for --agent-bin when --agent-provider codex is used.'
   },
   'plan-dir': {
     type: 'string',
@@ -175,7 +193,7 @@ const cliArgs = {
   },
   dryRun: {
     type: 'boolean',
-    description: 'Write the plan and print codex argv without executing.'
+    description: 'Write the plan and print provider argv without executing.'
   },
   loop: {
     type: 'boolean',
@@ -198,20 +216,20 @@ const cliArgs = {
   continue: {
     type: 'boolean',
     alias: 'c',
-    description: 'Resume the latest Codex exec session.'
+    description: 'Resume the latest provider session.'
   },
   resume: {
     type: 'string',
     alias: 'r',
-    description: 'Resume a specific Codex exec session.'
+    description: 'Resume a specific provider session.'
   },
   'output-format': {
     type: 'string',
-    description: 'Use json to pass --json to Codex.'
+    description: 'Use json to pass --json to the current Codex provider.'
   },
   dangerouslySkipPermissions: {
     type: 'boolean',
-    description: 'Pass --dangerously-bypass-approvals-and-sandbox to Codex.'
+    description: 'Pass --dangerously-bypass-approvals-and-sandbox to the current Codex provider.'
   }
 } satisfies ArgsDef;
 
@@ -235,6 +253,8 @@ const knownCliFlags = new Set([
   '--permission-mode',
   '--name',
   '-n',
+  '--agent-provider',
+  '--agent-bin',
   '--codex-bin',
   '--oh-bin',
   '--plan-dir',
@@ -260,18 +280,18 @@ function isKnownCliFlag(arg: string): boolean {
   return knownCliFlags.has(flag as string);
 }
 
-function splitForwardedArgs(argv: string[]): { cliArgs: string[]; extraCodexArgs: string[] } {
+function splitForwardedArgs(argv: string[]): { cliArgs: string[]; extraAgentArgs: string[] } {
   let normalized = argv[0] === '--' ? argv.slice(1) : argv;
   const firstSeparatorIndex = normalized.indexOf('--');
   if (firstSeparatorIndex > 0 && normalized.slice(firstSeparatorIndex + 1).some(isKnownCliFlag))
     normalized = [...normalized.slice(0, firstSeparatorIndex), ...normalized.slice(firstSeparatorIndex + 1)];
 
   const separatorIndex = normalized.indexOf('--');
-  if (separatorIndex < 0) return { cliArgs: normalized, extraCodexArgs: [] };
+  if (separatorIndex < 0) return { cliArgs: normalized, extraAgentArgs: [] };
 
   return {
     cliArgs: normalized.slice(0, separatorIndex),
-    extraCodexArgs: normalized.slice(separatorIndex + 1)
+    extraAgentArgs: normalized.slice(separatorIndex + 1)
   };
 }
 
@@ -304,10 +324,14 @@ function parseNonNegativeInteger(value: string, optionName: string): number {
   return Number(value);
 }
 
-function toCliOptions(args: ParsedArgs<typeof cliArgs>, rawCliArgs: string[], extraCodexArgs: string[]): CliOptions {
+function toCliOptions(args: ParsedArgs<typeof cliArgs>, rawCliArgs: string[], extraAgentArgs: string[]): CliOptions {
   const task = String(args.task ?? args._.join(' ')).trim();
   const runner = args.runner as RunnerMode;
   if (!task && runner !== 'dispatcher') throw new Error('Missing task. Use --task "..." or pass the task as trailing args.');
+  const agentProvider = resolveAgentProvider(String(args.agentProvider ?? DEFAULT_AGENT_PROVIDER));
+  const legacyBin = collectLastValue(rawCliArgs, '--codex-bin') ?? collectLastValue(rawCliArgs, '--oh-bin');
+  if (legacyBin && agentProvider !== 'codex')
+    throw new Error('Legacy --codex-bin/--oh-bin aliases are only valid with --agent-provider codex. Use --agent-bin instead.');
 
   return {
     task: task || undefined,
@@ -325,11 +349,12 @@ function toCliOptions(args: ParsedArgs<typeof cliArgs>, rawCliArgs: string[], ex
     maxTurns: String(args.maxTurns),
     permissionMode: String(args.permissionMode),
     name: optionalString(args.name),
-    codexBin:
-      collectLastValue(rawCliArgs, '--codex-bin') ??
-      collectLastValue(rawCliArgs, '--oh-bin') ??
-      optionalString(args.codexBin) ??
-      DEFAULT_CODEX_BIN,
+    agentProvider,
+    agentBin:
+      collectLastValue(rawCliArgs, '--agent-bin') ??
+      legacyBin ??
+      optionalString(args.agentBin) ??
+      agentProviders[agentProvider].defaultBin,
     planDir: String(args.planDir),
     layer2Refs: collectRepeatedValues(rawCliArgs, '--layer2-ref'),
     dryRun: Boolean(args.dryRun),
@@ -341,7 +366,7 @@ function toCliOptions(args: ParsedArgs<typeof cliArgs>, rawCliArgs: string[], ex
     resume: optionalString(args.resume),
     outputFormat: optionalString(args.outputFormat),
     dangerouslySkipPermissions: Boolean(args.dangerouslySkipPermissions),
-    extraCodexArgs
+    extraAgentArgs
   };
 }
 
@@ -690,36 +715,9 @@ ${layer2Block}
 Perform the user task now. Be autonomous: inspect only the files needed, implement changes, verify, update progress/tracker, and commit when appropriate.`;
 }
 
-function buildCodexInstruction(cwd: string, planPath: string): string {
+function buildProviderInstruction(cwd: string, planPath: string): string {
   const repoRelativePlanPath = relative(cwd, planPath);
   return `Read ${repoRelativePlanPath} and execute the plan exactly. Use that file as the full prompt/context; do not ask me to paste it again.`;
-}
-
-function buildCodexArgs(opts: CliOptions, cwd: string, instruction: string): string[] {
-  const args: string[] = ['exec'];
-
-  if (opts.continueSession || opts.resume) {
-    args.push('resume');
-    if (opts.continueSession && !opts.resume) args.push('--last');
-    if (opts.resume) args.push(opts.resume);
-  } else {
-    args.push('--cd', cwd);
-    if (opts.permissionMode === DEFAULT_PERMISSION_MODE) {
-      args.push('--sandbox', 'danger-full-access');
-      args.unshift('--ask-for-approval', 'never');
-    }
-  }
-
-  if (opts.model) args.push('--model', opts.model);
-  if (opts.outputFormat === 'json') args.push('--json');
-  else if (opts.outputFormat)
-    throw new Error(
-      `Unsupported Codex output format: ${opts.outputFormat}. Use --output-format json or pass raw Codex args after --.`
-    );
-  if (opts.dangerouslySkipPermissions) args.push('--dangerously-bypass-approvals-and-sandbox');
-  args.push(...opts.extraCodexArgs);
-  args.push(instruction);
-  return args;
 }
 
 function runnerDefaults(opts: CliOptions, runner: Exclude<RunnerMode, 'dispatcher'>): RunnerConfig {
@@ -755,7 +753,7 @@ function makeRunnerTask(task: string, runner: RunnerConfig['runner']): string {
   return `Review and acceptance-check the coder work for this task: ${task}`;
 }
 
-async function spawnCodex(command: string, args: string[], cwd: string): Promise<number> {
+async function spawnAgentProvider(command: string, args: string[], cwd: string): Promise<number> {
   return new Promise(resolveExit => {
     const child = spawn(command, args, {
       cwd,
@@ -831,28 +829,42 @@ async function runHarness(
 
   const runnerOpts = withRunnerConfig(opts, runnerConfig);
   const planPath = writePlanFile(cwd, opts.planDir, prompt, runnerConfig.runner);
-  const codexInstruction = buildCodexInstruction(cwd, planPath);
-  const codexArgs = buildCodexArgs(runnerOpts, cwd, codexInstruction);
+  const providerInstruction = buildProviderInstruction(cwd, planPath);
+  const providerCommand = buildProviderCommand({
+    provider: runnerOpts.agentProvider,
+    agentBin: runnerOpts.agentBin,
+    permissionMode: runnerOpts.permissionMode,
+    defaultPermissionMode: DEFAULT_PERMISSION_MODE,
+    model: runnerOpts.model,
+    outputFormat: runnerOpts.outputFormat,
+    dangerouslySkipPermissions: runnerOpts.dangerouslySkipPermissions,
+    continueSession: runnerOpts.continueSession,
+    resume: runnerOpts.resume,
+    cwd,
+    instruction: providerInstruction,
+    extraAgentArgs: runnerOpts.extraAgentArgs
+  });
   if (opts.dryRun) {
     console.log(`[agent.ts] cwd=${cwd}`);
     console.log(
       `[agent.ts] runner=${runnerConfig.runner} model=${runnerConfig.model ?? '-'} effort=${runnerConfig.effort ?? '-'} temperature=${runnerConfig.temperature}`
     );
+    console.log(`[agent.ts] agentProvider=${runnerOpts.agentProvider} agentBin=${runnerOpts.agentBin}`);
     console.log(
       `[agent.ts] selectedFeature=${context.selectedFeature?.id ?? 'none'} status=${context.selectedFeature?.status ?? '-'}`
     );
     console.log(`[agent.ts] layer2=${context.layer2.map(doc => doc.path).join(', ')}`);
     console.log(`[agent.ts] plan=${relative(cwd, planPath)}`);
-    console.log(`[agent.ts] command=${opts.codexBin} ${codexArgs.map(arg => JSON.stringify(arg)).join(' ')}`);
-    console.log('\nPrompt written to the plan file above. Re-run without --dry-run to launch Codex.');
+    console.log(`[agent.ts] command=${formatProviderCommand(providerCommand)}`);
+    console.log('\nPrompt written to the plan file above. Re-run without --dry-run to launch the selected provider.');
     return 0;
   }
 
   console.log(`[agent.ts] wrote plan ${relative(cwd, planPath)}`);
   console.log(
-    `[agent.ts] launching ${basename(opts.codexBin)} runner=${runnerConfig.runner} feature=${context.selectedFeature?.id ?? 'none'} with ${context.layer2.length} routed docs`
+    `[agent.ts] launching ${basename(providerCommand.command)} provider=${runnerOpts.agentProvider} runner=${runnerConfig.runner} feature=${context.selectedFeature?.id ?? 'none'} with ${context.layer2.length} routed docs`
   );
-  return spawnCodex(opts.codexBin, codexArgs, cwd);
+  return spawnAgentProvider(providerCommand.command, providerCommand.args, cwd);
 }
 
 async function runDispatcherOnce(opts: CliOptions, cwd: string, iteration?: number): Promise<DispatcherRunResult> {
@@ -965,17 +977,21 @@ async function runWithOptions(opts: CliOptions) {
 const main = defineCommand({
   meta: {
     name: 'agent',
-    description: 'Codex dispatcher for repository feature work.'
+    description: 'Agent dispatcher for repository feature work.'
   },
   args: cliArgs,
   async run({ rawArgs }) {
-    const { cliArgs: parsedCliArgs, extraCodexArgs } = splitForwardedArgs(rawArgs);
+    const { cliArgs: parsedCliArgs, extraAgentArgs } = splitForwardedArgs(rawArgs);
     const reparsedArgs = parseCittyArgs<typeof cliArgs>(parsedCliArgs, cliArgs);
-    await runWithOptions(toCliOptions(reparsedArgs, parsedCliArgs, extraCodexArgs));
+    await runWithOptions(toCliOptions(reparsedArgs, parsedCliArgs, extraAgentArgs));
   }
 });
 
-runMain(main).catch(error => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (process.env.NODE_ENV !== 'test') {
+  runMain(main).catch(error => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}
+
+export { buildProviderInstruction, splitForwardedArgs, toCliOptions };

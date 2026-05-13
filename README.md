@@ -9,7 +9,7 @@
 - 用 `AGENTS.md` 和 `CONTEXT-GATE.md` 固化每轮会话协议。
 - 用 `feature_list.json` 跟踪功能队列，并约束同一时间只有一个 active feature。
 - 用 `claude-progress.md` 记录已验证状态、会话日志、blocker 和重启路径。
-- 提供 dispatcher / coder / reviewer 三种 Codex runner，自动生成有边界的执行 prompt。
+- 提供 dispatcher / coder / reviewer 三种 runner，并通过 agent provider 注册表选择执行后端。
 - 通过 `init.sh`、`pnpm test`、`pnpm build` 留下可运行验证证据。
 - 通过 `evaluator-rubric.md` 和 `clean-state-checklist.md` 做结束前自审。
 
@@ -21,7 +21,8 @@
 | `CONTEXT-GATE.md` | 渐进式上下文加载规则和硬约束。 |
 | `feature_list.json` | 功能队列、状态、优先级和 evidence。 |
 | `claude-progress.md` | 当前已验证状态、会话日志、风险和下一步。 |
-| `agent.ts` | TypeScript 版 Codex 启动器和 dispatcher。 |
+| `agent.ts` | TypeScript 版 agent 启动器和 dispatcher。 |
+| `agent-providers.ts` | TypeScript 版 provider 注册表和命令构建模块。 |
 | `agent/` | Python 版启动器实现。 |
 | `init.sh` | 依赖同步和基础验证入口。 |
 | `clean-state-checklist.md` | session 结束前的干净状态检查。 |
@@ -31,7 +32,7 @@
 ## 环境要求
 
 - Node.js 和 `pnpm`。
-- Codex CLI，默认可执行名为 `codex`；也可以通过 `--codex-bin` 指定路径。
+- 当前可执行 provider 为 Codex CLI，默认可执行名为 `codex`；可通过 `--agent-bin` 指定路径。
 - 如果使用 Python 启动器，需要 Python 3.11+。
 
 当前仓库在 `package.json` 中声明使用 `pnpm@10.28.2`。
@@ -56,7 +57,7 @@ pnpm test
 pnpm build
 ```
 
-查看 TypeScript 启动器生成的 Codex prompt 和命令，但不真正启动 Codex：
+查看 TypeScript 启动器生成的 prompt 和 provider 命令，但不真正启动 provider：
 
 ```bash
 pnpm agent -- --task "Implement the next feature" --dry-run
@@ -82,7 +83,9 @@ not_started -> in_progress -> pending_review -> passing
 
 ## Agent 启动器
 
-启动器会读取协议文件、运行 preflight、选择 feature 上下文、在 `docs/plans` 下写入执行计划，然后调用 Codex。
+启动器会读取协议文件、运行 preflight、选择 feature 上下文、在 `docs/plans` 下写入执行计划，然后调用当前 agent provider。
+
+V0.1 注册的 provider 为 `codex`、`claude`、`openharness`、`kimi`、`gemini`。当前只有 `codex` 支持执行，其余 provider 会以明确的 unsupported stub 失败。
 
 常用命令：
 
@@ -103,10 +106,12 @@ pnpm agent:loop -- --max-loop-iterations 3
 | `--runner` | 选择 `coder`、`reviewer` 或 `dispatcher`。 |
 | `--layer2-ref` | 额外加载一份 Layer 2 上下文文档。 |
 | `--skip-init` | 跳过 `./init.sh` preflight。 |
-| `--dry-run` | 只写 plan 并打印 Codex 命令，不启动 Codex。 |
-| `--continue`, `-c` | 继续最近一次 Codex exec session。 |
-| `--resume`, `-r` | 继续指定 Codex exec session。 |
-| `--codex-bin` | 指定 Codex 可执行文件。 |
+| `--dry-run` | 只写 plan 并打印 provider 命令，不启动 provider。 |
+| `--continue`, `-c` | 继续最近一次 provider session。 |
+| `--resume`, `-r` | 继续指定 provider session。 |
+| `--agent-provider` | 指定 provider，默认 `codex`。 |
+| `--agent-bin` | 指定 provider 可执行文件。 |
+| `--codex-bin` | Codex provider 的 legacy alias；新用法应使用 `--agent-bin`。 |
 
 Python 启动器也提供同样的工作流：
 

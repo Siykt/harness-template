@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+AgentProviderId = Literal["codex", "claude", "openharness", "kimi", "gemini"]
 RunnerMode = Literal["coder", "reviewer", "dispatcher"]
 RunnerExecMode = Literal["coder", "reviewer"]
 StopReason = Literal["blocked", "no_work"]
@@ -58,7 +59,8 @@ class CliOptions:
     max_turns: str
     permission_mode: str
     name: str | None
-    codex_bin: str
+    agent_provider: AgentProviderId
+    agent_bin: str
     plan_dir: str
     layer2_refs: list[str]
     dry_run: bool
@@ -70,7 +72,7 @@ class CliOptions:
     resume: str | None
     output_format: str | None
     dangerously_skip_permissions: bool
-    extra_codex_args: list[str]
+    extra_agent_args: list[str]
 
 
 @dataclass(frozen=True)

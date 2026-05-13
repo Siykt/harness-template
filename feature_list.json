@@ -74,13 +74,34 @@
     {
       "id": "HT-001",
       "title": "拆分 agent bin 与 agent provider 命名",
-      "status": "not_started",
+      "status": "pending_review",
       "priority": 1,
       "layer2_refs": [
         "docs/features/HT-001-agent-bin-split.md"
       ],
-      "evidence": [],
-      "notes": "将 agent provider / bin 选择模块化；本期仅实现基础 codex 能力，同时登记 claude、openharness、kimi、gemini 扩展点。"
+      "evidence": [
+        {
+          "date": "2026-05-13",
+          "command": "pnpm test",
+          "result": "PASS: vitest run 1 file / 5 tests passed, covering provider registry, codex provider command path, unsupported provider stubs, provider-neutral agent bin defaults, and --codex-bin legacy alias."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 5ms."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm agent -- --task \"smoke\" --dry-run",
+          "result": "PASS: dry-run printed agentProvider=codex agentBin=codex and generated a codex provider command using docs/plans/plan-2026-05-13-coder-004.md."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "python3 agent.py --task smoke --dry-run --skip-init",
+          "result": "PASS: Python launcher printed agentProvider=codex agentBin=codex and generated the same provider-neutral codex command path."
+        }
+      ],
+      "notes": "已将 agent provider / bin 选择模块化；TypeScript 与 Python 均登记 codex、claude、openharness、kimi、gemini。当前仅 codex provider 支持执行，其他 provider 明确返回 unsupported stub。新参数为 --agent-provider 和 --agent-bin，--codex-bin/--oh-bin 保留为 codex legacy alias。"
     },
     {
       "id": "HT-002",

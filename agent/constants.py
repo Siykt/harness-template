@@ -1,6 +1,7 @@
 DEFAULT_MAX_TURNS = "40"
 DEFAULT_PERMISSION_MODE = "full_auto"
-DEFAULT_CODEX_BIN = "codex"
+DEFAULT_AGENT_PROVIDER = "codex"
+DEFAULT_AGENT_BIN = "codex"
 DEFAULT_LOOP_DELAY_MS = "1000"
 DEFAULT_MAX_LOOP_ITERATIONS = "0"
 DEFAULT_CODER_MODEL = "gpt-5.5"
@@ -30,6 +31,8 @@ KNOWN_CLI_FLAGS = {
     "--permission-mode",
     "--name",
     "-n",
+    "--agent-provider",
+    "--agent-bin",
     "--codex-bin",
     "--oh-bin",
     "--plan-dir",
