@@ -14,6 +14,12 @@ import {
   writeFeatureSpec
 } from '../feature-agent';
 
+type ToCliOptionsInput = Parameters<typeof toCliOptions>[0];
+
+function asToCliOptionsInput(value: Record<string, unknown>): ToCliOptionsInput {
+  return value as unknown as ToCliOptionsInput;
+}
+
 describe('agent provider registry', () => {
   it('registers the v0.1 provider list', () => {
     expect(agentProviderIds).toEqual(['codex', 'claude', 'openharness', 'kimi', 'gemini']);
@@ -75,10 +81,15 @@ describe('agent CLI options', () => {
   it('uses provider-neutral agent bin naming by default', () => {
     const { cliArgs, extraAgentArgs } = splitForwardedArgs(['--task', 'smoke', '--dry-run', '--', '--color', 'never']);
     const opts = toCliOptions(
-      {
+      asToCliOptionsInput({
         _: ['smoke'],
         task: 'smoke',
+        feature: undefined,
         runner: 'coder',
+        model: undefined,
+        effort: undefined,
+        temperature: undefined,
+        'coder-model': undefined,
         maxTurns: '40',
         permissionMode: 'full_auto',
         agentProvider: 'codex',
@@ -90,7 +101,7 @@ describe('agent CLI options', () => {
         skipInit: false,
         continue: false,
         dangerouslySkipPermissions: false
-      },
+      }),
       cliArgs,
       extraAgentArgs
     );
@@ -102,7 +113,7 @@ describe('agent CLI options', () => {
 
   it('keeps --codex-bin as a codex-only legacy alias for --agent-bin', () => {
     const opts = toCliOptions(
-      {
+      asToCliOptionsInput({
         _: [],
         task: 'smoke',
         runner: 'coder',
@@ -117,7 +128,7 @@ describe('agent CLI options', () => {
         skipInit: false,
         continue: false,
         dangerouslySkipPermissions: false
-      },
+      }),
       ['--task', 'smoke', '--codex-bin', '/bin/codex'],
       []
     );

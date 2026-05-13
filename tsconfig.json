@@ -12,7 +12,7 @@
     "outDir": "dist",
     "isolatedModules": true
   },
-  "include": ["src", "prisma", "agent.ts"],
+  "include": ["src", "prisma", "agent.ts", "scripts", "tests"],
   "exclude": ["node_modules", "dist"],
   "ts-node": {
     "esm": true,
