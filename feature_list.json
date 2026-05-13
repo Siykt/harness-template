@@ -1,6 +1,6 @@
 {
   "project": "harness-template",
-  "last_updated": "2026-05-12",
+  "last_updated": "2026-05-13",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -38,6 +38,71 @@
         }
       ],
       "notes": "README 已补充项目定位、目录结构、快速开始、feature 状态流、agent 启动器、上下文协议、验证与收尾要求。"
+    },
+    {
+      "id": "HT-000",
+      "title": "登记 Harness Template V0.1 feature specs",
+      "status": "passing",
+      "priority": 0,
+      "layer2_refs": [
+        "docs/features/harness-template-v0.1-features.md"
+      ],
+      "evidence": [
+        {
+          "date": "2026-05-13",
+          "command": "./init.sh",
+          "result": "PASS: vitest run 1 file / 4 tests passed; init.sh completed without errors after spec changes."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "python3 feature spec consistency check",
+          "result": "PASS: HT-001, HT-002, HT-003 exist in feature_list.json with expected status, priority, layer2_refs, and docs/features files."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm test",
+          "result": "PASS: Test Files 1 passed (1), Tests 4 passed (4)."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success, dist/index.mjs generated."
+        }
+      ],
+      "notes": "已将 V0.1 的三个后续原子 feature 写入 docs/features，并登记到 feature_list.json；实现类 feature 仍保持 not_started。"
+    },
+    {
+      "id": "HT-001",
+      "title": "拆分 agent bin 与 agent provider 命名",
+      "status": "not_started",
+      "priority": 1,
+      "layer2_refs": [
+        "docs/features/HT-001-agent-bin-split.md"
+      ],
+      "evidence": [],
+      "notes": "将 agent provider / bin 选择模块化；本期仅实现基础 codex 能力，同时登记 claude、openharness、kimi、gemini 扩展点。"
+    },
+    {
+      "id": "HT-002",
+      "title": "添加 feature agent",
+      "status": "not_started",
+      "priority": 2,
+      "layer2_refs": [
+        "docs/features/HT-002-feature-agent.md"
+      ],
+      "evidence": [],
+      "notes": "新增协助编写 atomic features 的 feature agent，要求写入 docs/features、同步 feature_list、校验 todo table 一致性，并约束 chore 提交类型。"
+    },
+    {
+      "id": "HT-003",
+      "title": "补充 GitHub Actions e2e 验证",
+      "status": "not_started",
+      "priority": 3,
+      "layer2_refs": [
+        "docs/features/HT-003-e2e-github-action.md"
+      ],
+      "evidence": [],
+      "notes": "为 agent 拆分和 feature agent 设计补充模块化 e2e action 验证，避免引入过多额外依赖。"
     }
   ]
 }
