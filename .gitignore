@@ -44,18 +44,6 @@ database.db
 # Prisma generated files (auto-generated on `prisma generate`)
 prisma/generated/
 
-# OpenClaw workspace files (AI assistant config, not project code)
-AGENTS.md
-SOUL.md
-IDENTITY.md
-USER.md
-TOOLS.md
-HEARTBEAT.md
-BOOTSTRAP.md
-MEMORY.md
-memory/
-.openclaw/
-
 # Runtime state
 runtime/
 tmp/
