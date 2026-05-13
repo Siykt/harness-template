@@ -153,13 +153,34 @@
     {
       "id": "HT-003",
       "title": "补充 GitHub Actions e2e 验证",
-      "status": "not_started",
+      "status": "pending_review",
       "priority": 3,
       "layer2_refs": [
         "docs/features/HT-003-e2e-github-action.md"
       ],
-      "evidence": [],
-      "notes": "为 agent 拆分和 feature agent 设计补充模块化 e2e action 验证，避免引入过多额外依赖。"
+      "evidence": [
+        {
+          "date": "2026-05-13",
+          "command": "pnpm e2e",
+          "result": "PASS: completed 3 dry-run checks covering default coder provider, explicit codex provider, and feature agent dry-run output."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm test",
+          "result": "PASS: vitest run 1 file / 11 tests passed."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript type check completed with exit 0."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 5ms."
+        }
+      ],
+      "notes": "新增模块化 GitHub Actions e2e workflow 和本地 pnpm e2e dry-run 脚本；覆盖默认 Codex provider、显式 Codex provider、feature agent dry-run，不引入 Playwright、Docker 服务或外部 API。"
     }
   ]
 }

@@ -51,6 +51,12 @@
 pnpm test
 ```
 
+运行本地 e2e dry-run 验证：
+
+```bash
+pnpm e2e
+```
+
 构建项目：
 
 ```bash
@@ -143,8 +149,11 @@ python3 -m agent --task "Implement the next feature" --dry-run
 
 ```bash
 pnpm test
+pnpm e2e
 pnpm build
 ```
+
+GitHub Actions 会在 push 和 pull request 上运行 `.github/workflows/e2e.yml`。该 workflow 复用本地 `pnpm e2e` 脚本，覆盖默认 Codex provider dry-run、显式 Codex provider dry-run 和 feature agent dry-run，不依赖 Playwright、Docker 服务或外部 API。
 
 结束 session 前：
 

@@ -5,12 +5,69 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-002`
+- 当前最高优先级未完成功能：`HT-003`（pending_review，等待 reviewer 验收）
 - 当前唯一 active feature：`无`
 - 当前 blocker：`无`
-- 最近完成：`HT-001` 拆分 agent bin 与 agent provider 命名
+- 最近完成：`HT-003` 补充 GitHub Actions e2e 验证（coder 完成，待 review）
 
 ## 会话记录
+
+
+### Session 2026-05-13 HT-003 e2e GitHub Actions
+
+- 日期：2026-05-13
+- 本轮目标：按 `docs/plans/plan-2026-05-13-coder-009.md` 实现 `HT-003` GitHub Actions e2e 验证；完成本地验证后将状态更新为 `pending_review` 并记录 evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`。
+  - `git log --oneline -5`：`7881207 chore: accept HT-002 reviewer gate`、`a731be5 feat: add feature agent`、`bc560fd chore: accept HT-001 reviewer gate`、`91950a5 feat: split agent provider bin handling`、`da1b6b7 chore: add agent.ts need scripts`。
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - Layer 1：选定唯一 active feature `HT-003`，初始状态 `not_started`；实现前更新为 `in_progress`。
+  - Layer 2：读取 `docs/features/HT-003-e2e-github-action.md`；同时读取用户指定的 `docs/plans/plan-2026-05-13-coder-009.md` 作为完整执行 prompt/context。
+- 已完成：
+  - 新增 `.github/workflows/e2e.yml`：在 `push` 和 `pull_request` 上运行，步骤为 checkout、setup pnpm、setup Node、install、`pnpm test`、`pnpm build`、`pnpm e2e`。
+  - 新增 `scripts/e2e.ts`：本地可运行的 e2e dry-run 脚本，使用临时 plan 目录，不依赖外部 API；检查默认 coder provider dry-run、显式 codex provider dry-run、feature agent dry-run。
+  - 更新 `package.json`：新增 `pnpm e2e`。
+  - 更新 `README.md`：记录 `pnpm e2e` 和 GitHub Actions e2e 覆盖范围。
+  - 更新 `docs/features/HT-003-e2e-github-action.md`：将 HT-003 todo table 项更新为 `done`。
+  - 更新 `feature_list.json`：将 `HT-003.status` 更新为 `pending_review`，追加本轮验证 evidence；未标记为 `passing`，等待 reviewer 验收。
+- 运行过的验证：
+  - `pnpm e2e`：PASS；输出包含 `PASS default coder dry-run`、`PASS explicit codex provider dry-run`、`PASS feature agent dry-run`、`completed 3 dry-run checks`。
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - `pnpm exec tsc --noEmit`：PASS；exit 0，无错误输出。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 5ms`。
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` 启动 smoke PASS；新增 `pnpm e2e` 覆盖 agent provider 拆分和 feature agent 关键 dry-run 路径，结果 PASS。
+- 更新过的文件或工件：
+  - `.github/workflows/e2e.yml`：新增 CI e2e workflow。
+  - `scripts/e2e.ts`：新增本地 e2e dry-run 脚本。
+  - `package.json`：新增 `e2e` 脚本。
+  - `README.md`：补充本地和 CI e2e 文档。
+  - `docs/features/HT-003-e2e-github-action.md`：todo 状态更新。
+  - `feature_list.json`：`HT-003` 进入 `pending_review` 并记录 evidence。
+  - `claude-progress.md`：记录本轮修改、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - GitHub Actions workflow 尚未在远端 GitHub 环境实际运行；本轮本地验证覆盖 workflow 复用的 `pnpm test`、`pnpm build`、`pnpm e2e` 命令。
+  - `./init.sh` 中 pnpm 提示 `Ignored build scripts: esbuild@0.27.7`，未影响测试或构建。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，workflow、可本地运行 e2e 脚本、默认/codex provider dry-run、feature agent dry-run 和依赖规模控制均符合 HT-003 验收表。
+  - 验证：2/2，已运行 `pnpm e2e`、`pnpm test`、`pnpm exec tsc --noEmit`、`pnpm build`，并将 evidence 写入 `feature_list.json`。
+  - 范围纪律：2/2，本轮只围绕 `HT-003` 修改 workflow、e2e 脚本、脚本入口、README、feature spec、tracker 和进度日志。
+  - 可靠性：2/2，e2e 使用 dry-run 和临时 plan 目录，可重复运行且不依赖外部服务。
+  - 可维护性：2/2，CI 逻辑复用 `pnpm e2e`，复杂检查留在 TypeScript 脚本中，workflow 保持简洁。
+  - 交接准备度：2/2，下一轮 reviewer 可直接从 `HT-003` 的 `pending_review` evidence、workflow 和 e2e 脚本开始验收。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  11 passed (11)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 5ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入和最终状态检查后执行；实际 commit hash 由最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-003.status` 已更新为 `pending_review`，未标记为 `passing`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；远端 GitHub Actions 尚未实际运行作为已知边界记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 运行 reviewer 接受门：审查 `.github/workflows/e2e.yml`、`scripts/e2e.ts`、`README.md` 和 `feature_list.json` evidence；若接受，将 `HT-003` 从 `pending_review` 更新为 `passing` 并记录 reviewer evidence。
 
 ### Session 2026-05-13 HT-002 reviewer acceptance
 

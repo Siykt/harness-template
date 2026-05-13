@@ -11,6 +11,7 @@
     "agent:dispatch": "tsx agent.ts --runner dispatcher",
     "agent:loop": "tsx agent.ts --runner dispatcher --loop",
     "build": "tsup",
+    "e2e": "tsx scripts/e2e.ts",
     "test": "vitest run"
   },
   "keywords": [],
