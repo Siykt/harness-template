@@ -153,7 +153,7 @@
     {
       "id": "HT-003",
       "title": "补充 GitHub Actions e2e 验证",
-      "status": "pending_review",
+      "status": "passing",
       "priority": 3,
       "layer2_refs": [
         "docs/features/HT-003-e2e-github-action.md"
@@ -178,6 +178,11 @@
           "date": "2026-05-13",
           "command": "pnpm build",
           "result": "PASS: tsup ESM build success in 5ms."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "reviewer acceptance: static inspection + pnpm e2e + pnpm test + pnpm exec tsc --noEmit + pnpm build",
+          "result": "PASS: reviewer accepted HT-003. Workflow runs on push and pull_request, delegates complex checks to pnpm e2e, covers default coder provider dry-run, explicit codex provider dry-run, and feature agent dry-run, and introduces no Playwright, Docker service, or external API dependency."
         }
       ],
       "notes": "新增模块化 GitHub Actions e2e workflow 和本地 pnpm e2e dry-run 脚本；覆盖默认 Codex provider、显式 Codex provider、feature agent dry-run，不引入 Playwright、Docker 服务或外部 API。"

@@ -5,13 +5,65 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-003`（pending_review，等待 reviewer 验收）
+- 当前最高优先级未完成功能：`无`
 - 当前唯一 active feature：`无`
 - 当前 blocker：`无`
-- 最近完成：`HT-003` 补充 GitHub Actions e2e 验证（coder 完成，待 review）
+- 最近完成：`HT-003` reviewer 验收通过，GitHub Actions e2e 验证进入 passing
 
 ## 会话记录
 
+
+### Session 2026-05-13 HT-003 reviewer acceptance
+
+- 日期：2026-05-13
+- 本轮目标：按 `docs/plans/plan-2026-05-13-reviewer-003.md` 对 `HT-003` 做严格 acceptance gate；若可接受，将状态从 `pending_review` 更新为 `passing` 并记录 reviewer evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`。
+  - `git log --oneline -5`：`e2f1a90 feat: add e2e action`、`7881207 chore: accept HT-002 reviewer gate`、`a731be5 feat: add feature agent`、`bc560fd chore: accept HT-001 reviewer gate`、`91950a5 feat: split agent provider bin handling`。
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - Layer 1：选定唯一 active review feature `HT-003`，当前状态 `pending_review`。
+  - Layer 2：读取 `docs/features/HT-003-e2e-github-action.md`；同时读取用户指定的 `docs/plans/plan-2026-05-13-reviewer-003.md` 作为完整执行 prompt/context。
+- 已完成：
+  - 审查 `.github/workflows/e2e.yml`：确认 workflow 在 `push` 和 `pull_request` 触发，步骤为 checkout、setup pnpm、setup Node、install、`pnpm test`、`pnpm build`、`pnpm e2e`。
+  - 审查 `scripts/e2e.ts`：确认本地 e2e 使用临时 plan 目录，执行默认 coder provider dry-run、显式 codex provider dry-run、feature agent dry-run，并校验关键输出。
+  - 审查 `package.json` 和 `README.md`：确认新增 `pnpm e2e` 脚本并记录本地/CI e2e 覆盖范围。
+  - 审查 `docs/features/HT-003-e2e-github-action.md`：确认 HT-003 todo table 已标记 `done`，验收命令包含 `pnpm test`、`pnpm build`、`pnpm e2e`。
+  - 更新 `feature_list.json`：将 `HT-003.status` 从 `pending_review` 改为 `passing`，追加 reviewer acceptance evidence。
+  - 更新 `claude-progress.md`：记录本轮 reviewer 检查、验证、rubric 和 clean-state checklist。
+- 运行过的验证：
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - `pnpm e2e`：PASS；输出包含 `PASS default coder dry-run`、`PASS explicit codex provider dry-run`、`PASS feature agent dry-run`、`completed 3 dry-run checks`。
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - `pnpm exec tsc --noEmit`：PASS；exit 0，无错误输出。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 4ms`。
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` 启动 smoke PASS；`pnpm e2e` 覆盖 agent provider 拆分和 feature agent 关键 dry-run 路径，结果 PASS。
+- 更新过的文件或工件：
+  - `feature_list.json`：`HT-003` reviewer 验收通过，状态更新为 `passing`，追加 review evidence。
+  - `claude-progress.md`：记录本轮 reviewer 验收、验证、rubric 和 checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - GitHub Actions workflow 尚未在远端 GitHub 环境实际运行；本轮本地验证覆盖 workflow 复用的 `pnpm test`、`pnpm build`、`pnpm e2e` 命令。
+  - `./init.sh` 中 pnpm 提示 `Ignored build scripts: esbuild@0.27.7`，未影响测试或构建。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，workflow 触发条件、本地 e2e 脚本、默认/codex provider dry-run、feature agent dry-run 和依赖规模均符合 HT-003 验收表。
+  - 验证：2/2，已运行 `./init.sh`、`pnpm e2e`、`pnpm test`、`pnpm exec tsc --noEmit`、`pnpm build`，并将 reviewer evidence 写入 `feature_list.json`。
+  - 范围纪律：2/2，本轮仅做 reviewer 检查并更新 tracker/progress 文件，未修改生产代码。
+  - 可靠性：2/2，e2e 使用 dry-run 和临时 plan 目录，可重复运行且不依赖外部服务。
+  - 可维护性：2/2，CI 逻辑复用 `pnpm e2e`，复杂检查保留在 TypeScript 脚本中，workflow 保持简洁。
+  - 交接准备度：2/2，仓库内已有 passing 状态、review evidence、workflow、脚本和文档，可直接继续下一项工作。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  11 passed (11)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 4ms`。
+  - PASS 本轮变更已 git commit：提交信息为 `chore: accept HT-003 reviewer gate`；最终 `git log --oneline -1` 输出见本轮最终回复。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-003.status` 已更新为 `passing`；远端 GitHub Actions 未实际运行作为已知边界记录。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；远端 GitHub Actions 尚未实际运行作为已知边界记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 当前 V0.1 已登记功能均为 `passing`；下一轮可由 dispatcher 选择新的 feature spec 或创建新的 atomic feature。
 
 ### Session 2026-05-13 HT-003 e2e GitHub Actions
 
