@@ -12,6 +12,58 @@
 
 ## 会话记录
 
+### Session 2026-05-13 HT-002 reviewer acceptance
+
+- 日期：2026-05-13
+- 本轮目标：按 `docs/plans/plan-2026-05-13-reviewer-002.md` 对 `HT-002` 做严格 acceptance gate；若可接受，将状态从 `pending_review` 更新为 `passing` 并记录 reviewer evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`a731be5 feat: add feature agent`、`bc560fd chore: accept HT-001 reviewer gate`、`91950a5 feat: split agent provider bin handling`、`da1b6b7 chore: add agent.ts need scripts`、`9ebfd0c chore: register v0.1 feature specs`
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - Layer 1：选定唯一 active review feature `HT-002`，当前状态 `pending_review`。
+  - Layer 2：读取 `docs/features/HT-002-feature-agent.md`；同时读取用户指定的 `docs/plans/plan-2026-05-13-reviewer-002.md` 作为完整执行 prompt/context。
+- 已完成：
+  - 审查 `feature-agent.ts`：确认 feature spec 生成包含 Requirement、Table Todo List、Verification、Feature List Consistency；写入路径为 `docs/features/<feature-id>.md`；同步 `feature_list.json` 并校验 id/status/priority/layer2_refs。
+  - 审查 `agent.ts`：确认新增 `feature` runner，dry-run 输出 docs/features、feature_list、一致性检查、`chore:` 提交约束和前端设计源要求；实际写入路径要求 feature id、title、priority 和需求文本。
+  - 审查 `tests/setup.test.ts`：确认覆盖 feature spec 生成、feature_list 同步、docs/features 写入、一致性检查、非 `chore:` 拒绝、前端设计源必填和 dry-run prompt。
+  - 审查 `README.md` 与 `package.json`：确认记录 `pnpm agent:feature` 与 feature runner CLI 用法。
+  - 更新 `feature_list.json`：将 `HT-002.status` 从 `pending_review` 改为 `passing`，追加 reviewer acceptance evidence。
+  - 更新 `claude-progress.md`：记录本轮 reviewer 检查、验证、rubric 和 clean-state checklist。
+- 运行过的验证：
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - `pnpm exec tsc --noEmit`：PASS；exit 0，无错误输出。
+  - `pnpm agent -- --runner feature --task "Draft an atomic feature" --dry-run`：PASS；输出包含 `docs/features/<feature-id>.md`、`feature_list.json`、`consistency check`、`chore:` 和 `Figma MCP link`。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 4ms`。
+- 基础 smoke/e2e 路径检查：
+  - 当前项目仍无独立 e2e 路径；基础 smoke 以 `./init.sh`、`pnpm test`、feature dry-run 和 `pnpm build` 覆盖，结果 PASS。
+- 更新过的文件或工件：
+  - `feature_list.json`：`HT-002` reviewer 验收通过，状态更新为 `passing`，追加 review evidence。
+  - `claude-progress.md`：记录本轮 reviewer 验收、验证、rubric 和 checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - `feature` runner 的实际写入路径是本地 deterministic generator，不启动外部 provider；按 HT-002 验收范围可接受。
+  - `./init.sh` 中 pnpm 提示 `Ignored build scripts: esbuild@0.27.7`，未影响测试或构建。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，feature runner、spec 写入、feature_list 同步、一致性校验、`chore:` 约束和前端设计源要求均符合 `HT-002` 验收表。
+  - 验证：2/2，已运行 `./init.sh`、`pnpm test`、`pnpm exec tsc --noEmit`、feature dry-run 和 `pnpm build`，并将 reviewer evidence 写入 `feature_list.json`。
+  - 范围纪律：2/2，本轮仅做 reviewer 检查并更新 tracker/progress 文件，未修改生产代码。
+  - 可靠性：2/2，dry-run 非破坏性，实际写入路径在创建前校验输入、commit 类型和 tracker 一致性。
+  - 可维护性：2/2，feature agent 逻辑集中在独立模块，CLI 只负责参数和输出，测试覆盖主要边界。
+  - 交接准备度：2/2，下一轮可直接从 `HT-003` 或最新提交继续。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  11 passed (11)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 4ms`。
+  - PASS 本轮变更已 git commit：提交信息为 `chore: accept HT-002 reviewer gate`；最终 `git log --oneline -1` 输出见本轮最终回复。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-002.status` 已更新为 `passing`；`HT-003` 仍为 `not_started`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；deterministic feature runner 作为已知边界记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 从 `HT-003` 开始实现 GitHub Actions e2e 验证，加载 `docs/features/HT-003-e2e-github-action.md` 作为 Layer 2。
+
 ### Session 2026-05-13 HT-002 feature agent
 
 - 日期：2026-05-13

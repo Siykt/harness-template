@@ -111,7 +111,7 @@
     {
       "id": "HT-002",
       "title": "添加 feature agent",
-      "status": "pending_review",
+      "status": "passing",
       "priority": 2,
       "layer2_refs": [
         "docs/features/HT-002-feature-agent.md"
@@ -141,6 +141,11 @@
           "date": "2026-05-13",
           "command": "./init.sh",
           "result": "PASS: vitest run 1 file / 11 tests passed; init.sh completed without errors."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "reviewer acceptance: static inspection + pnpm test + pnpm exec tsc --noEmit + pnpm build + feature dry-run",
+          "result": "PASS: reviewer accepted HT-002. Implementation includes feature runner, docs/features write path, feature_list sync, consistency validation, chore commit constraint, frontend design-source blocker, focused tests, and documented CLI usage."
         }
       ],
       "notes": "新增协助编写 atomic features 的 feature agent，要求写入 docs/features、同步 feature_list、校验 todo table 一致性，并约束 chore 提交类型。"
