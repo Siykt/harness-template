@@ -11,6 +11,7 @@ import {
   resolveAgentProvider,
   type AgentProviderId
 } from './agent-providers';
+import { buildFeatureAgentDryRunPrompt, validateChoreCommitMessage, writeFeatureSpec } from './feature-agent';
 
 interface FeatureSummary {
   id: string;
@@ -23,7 +24,7 @@ interface FeatureSummary {
 interface DispatchDecision {
   feature: FeatureSummary;
   reason: string;
-  runner: Exclude<RunnerMode, 'dispatcher'>;
+  runner: ProviderRunnerMode;
   task: string;
 }
 
@@ -54,7 +55,8 @@ const DEFAULT_REVIEWER_MODEL = 'gpt-5.5';
 const DEFAULT_REVIEWER_EFFORT = 'high';
 const DEFAULT_REVIEWER_TEMPERATURE = '0';
 
-type RunnerMode = 'coder' | 'reviewer' | 'dispatcher';
+type ProviderRunnerMode = 'coder' | 'reviewer';
+type RunnerMode = ProviderRunnerMode | 'dispatcher' | 'feature';
 
 interface CliOptions {
   task?: string;
@@ -69,6 +71,12 @@ interface CliOptions {
   reviewerModel?: string;
   reviewerEffort?: string;
   reviewerTemperature?: string;
+  newFeatureId?: string;
+  featureTitle?: string;
+  featurePriority?: string;
+  frontendProject: boolean;
+  designSource?: string;
+  commitMessage?: string;
   maxTurns: string;
   permissionMode: string;
   name?: string;
@@ -89,7 +97,7 @@ interface CliOptions {
 }
 
 interface RunnerConfig {
-  runner: Exclude<RunnerMode, 'dispatcher'>;
+  runner: ProviderRunnerMode;
   model?: string;
   effort?: string;
   temperature: string;
@@ -108,7 +116,7 @@ const cliArgs = {
   },
   runner: {
     type: 'enum',
-    options: ['coder', 'reviewer', 'dispatcher'],
+    options: ['coder', 'reviewer', 'dispatcher', 'feature'],
     default: 'coder',
     description: 'Runner mode.'
   },
@@ -148,6 +156,30 @@ const cliArgs = {
   'reviewer-temperature': {
     type: 'string',
     description: `Recorded in reviewer plan. Default: ${DEFAULT_REVIEWER_TEMPERATURE}.`
+  },
+  'new-feature-id': {
+    type: 'string',
+    description: 'For --runner feature, the feature id to create, for example HT-004.'
+  },
+  'feature-title': {
+    type: 'string',
+    description: 'For --runner feature, the title to write into feature_list.json and docs/features.'
+  },
+  'feature-priority': {
+    type: 'string',
+    description: 'For --runner feature, the priority to write into feature_list.json.'
+  },
+  'frontend-project': {
+    type: 'boolean',
+    description: 'For --runner feature, require a Figma MCP link or original design file path.'
+  },
+  'design-source': {
+    type: 'string',
+    description: 'For --runner feature, Figma MCP link or original design file path for frontend work.'
+  },
+  'commit-message': {
+    type: 'string',
+    description: 'For --runner feature, proposed commit message. Must start with chore:.'
   },
   'max-turns': {
     type: 'string',
@@ -249,6 +281,13 @@ const knownCliFlags = new Set([
   '--reviewer-model',
   '--reviewer-effort',
   '--reviewer-temperature',
+  '--new-feature-id',
+  '--feature-title',
+  '--feature-priority',
+  '--frontend-project',
+  '--frontendProject',
+  '--design-source',
+  '--commit-message',
   '--max-turns',
   '--permission-mode',
   '--name',
@@ -346,6 +385,12 @@ function toCliOptions(args: ParsedArgs<typeof cliArgs>, rawCliArgs: string[], ex
     reviewerModel: optionalString(args.reviewerModel),
     reviewerEffort: optionalString(args.reviewerEffort),
     reviewerTemperature: optionalString(args.reviewerTemperature),
+    newFeatureId: optionalString(args.newFeatureId),
+    featureTitle: optionalString(args.featureTitle),
+    featurePriority: optionalString(args.featurePriority),
+    frontendProject: Boolean(args.frontendProject),
+    designSource: optionalString(args.designSource),
+    commitMessage: optionalString(args.commitMessage),
     maxTurns: String(args.maxTurns),
     permissionMode: String(args.permissionMode),
     name: optionalString(args.name),
@@ -490,7 +535,7 @@ function byPriorityThenId(a: FeatureSummary, b: FeatureSummary): number {
   return a.priority - b.priority || a.id.localeCompare(b.id);
 }
 
-function dispatchTaskFor(feature: FeatureSummary, runner: Exclude<RunnerMode, 'dispatcher'>, requestedTask?: string): string {
+function dispatchTaskFor(feature: FeatureSummary, runner: ProviderRunnerMode, requestedTask?: string): string {
   const statusContract =
     runner === 'coder'
       ? [
@@ -720,7 +765,7 @@ function buildProviderInstruction(cwd: string, planPath: string): string {
   return `Read ${repoRelativePlanPath} and execute the plan exactly. Use that file as the full prompt/context; do not ask me to paste it again.`;
 }
 
-function runnerDefaults(opts: CliOptions, runner: Exclude<RunnerMode, 'dispatcher'>): RunnerConfig {
+function runnerDefaults(opts: CliOptions, runner: ProviderRunnerMode): RunnerConfig {
   if (runner === 'coder') {
     return {
       runner,
@@ -958,6 +1003,49 @@ async function runDispatcherLoop(opts: CliOptions, cwd: string): Promise<number>
   }
 }
 
+async function runFeatureAgent(opts: CliOptions, cwd: string): Promise<number> {
+  if (opts.commitMessage) validateChoreCommitMessage(opts.commitMessage);
+
+  if (opts.dryRun) {
+    console.log(buildFeatureAgentDryRunPrompt());
+    console.log(`[agent.ts] cwd=${cwd}`);
+    console.log('[agent.ts] runner=feature');
+    console.log(`[agent.ts] targetFeature=${opts.newFeatureId ?? opts.feature ?? '<required for write>'}`);
+    console.log(`[agent.ts] featureTitle=${opts.featureTitle ?? opts.name ?? '<required for write>'}`);
+    console.log(`[agent.ts] featurePriority=${opts.featurePriority ?? '<required for write>'}`);
+    console.log('[agent.ts] dry-run only; no docs/features file or feature_list.json entry was written.');
+    return 0;
+  }
+
+  const targetFeatureId = opts.newFeatureId ?? opts.feature;
+  const title = opts.featureTitle ?? opts.name;
+  if (!targetFeatureId) throw new Error('Missing target feature id. Use --new-feature-id HT-004 with --runner feature.');
+  if (!title) throw new Error('Missing feature title. Use --feature-title "..." with --runner feature.');
+  if (!opts.featurePriority) throw new Error('Missing feature priority. Use --feature-priority N with --runner feature.');
+  if (!opts.task) throw new Error('Missing feature requirement. Use --task "..." with --runner feature.');
+
+  const result = writeFeatureSpec(
+    cwd,
+    {
+      id: targetFeatureId,
+      title,
+      requirement: opts.task,
+      priority: parseNonNegativeInteger(opts.featurePriority, '--feature-priority'),
+      status: 'not_started',
+      isFrontendProject: opts.frontendProject,
+      designSource: opts.designSource
+    },
+    opts.commitMessage ?? 'chore: add feature spec'
+  );
+
+  console.log(`[agent.ts] feature spec written: ${result.featurePath}`);
+  console.log(
+    `[agent.ts] feature_list.json updated: ${result.feature.id} status=${result.feature.status} priority=${result.feature.priority} layer2_refs=${result.feature.layer2_refs.join(', ')}`
+  );
+  console.log('[agent.ts] commit discipline: use a chore: commit message for feature agent changes.');
+  return 0;
+}
+
 async function runWithOptions(opts: CliOptions) {
   const cwd = process.cwd();
 
@@ -968,6 +1056,9 @@ async function runWithOptions(opts: CliOptions) {
   if (opts.runner === 'dispatcher') {
     const exitCode = opts.loop ? await runDispatcherLoop(opts, cwd) : (await runDispatcherOnce(opts, cwd)).exitCode;
     process.exit(exitCode);
+  }
+  if (opts.runner === 'feature') {
+    process.exit(await runFeatureAgent(opts, cwd));
   }
 
   const exitCode = await runHarness(opts, cwd, runnerDefaults(opts, opts.runner));

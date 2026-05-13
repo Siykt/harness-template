@@ -111,12 +111,38 @@
     {
       "id": "HT-002",
       "title": "添加 feature agent",
-      "status": "not_started",
+      "status": "pending_review",
       "priority": 2,
       "layer2_refs": [
         "docs/features/HT-002-feature-agent.md"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "date": "2026-05-13",
+          "command": "pnpm test",
+          "result": "PASS: vitest run 1 file / 11 tests passed, covering feature spec generation, docs/features write path, feature_list sync, consistency checks, chore commit constraint, frontend design-source requirement, and feature dry-run prompt text."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript type check completed with exit 0."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 16ms."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "pnpm agent -- --runner feature --task \"Draft an atomic feature\" --dry-run",
+          "result": "PASS: dry-run output included docs/features write requirements, feature_list sync, consistency check, chore: commit constraint, and Figma/design-source requirement."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "./init.sh",
+          "result": "PASS: vitest run 1 file / 11 tests passed; init.sh completed without errors."
+        }
+      ],
       "notes": "新增协助编写 atomic features 的 feature agent，要求写入 docs/features、同步 feature_list、校验 todo table 一致性，并约束 chore 提交类型。"
     },
     {

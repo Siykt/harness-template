@@ -1,6 +1,18 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { agentProviderIds, buildProviderCommand } from '../agent-providers';
 import { splitForwardedArgs, toCliOptions } from '../agent';
+import {
+  buildFeatureAgentDryRunPrompt,
+  buildFeatureSpecMarkdown,
+  createFeatureListEntry,
+  upsertFeatureListEntry,
+  validateChoreCommitMessage,
+  validateFeatureSpecConsistency,
+  writeFeatureSpec
+} from '../feature-agent';
 
 describe('agent provider registry', () => {
   it('registers the v0.1 provider list', () => {
@@ -111,5 +123,106 @@ describe('agent CLI options', () => {
     );
 
     expect(opts.agentBin).toBe('/bin/codex');
+  });
+});
+
+describe('feature agent', () => {
+  const featureInput = {
+    id: 'HT-004',
+    title: 'Add sample feature',
+    requirement: 'Add a small atomic feature spec for validation.',
+    priority: 4
+  };
+
+  it('generates an atomic feature spec with tracker consistency metadata', () => {
+    const markdown = buildFeatureSpecMarkdown(featureInput);
+    const entry = createFeatureListEntry(featureInput);
+
+    expect(markdown).toContain('## Requirement');
+    expect(markdown).toContain('## Table Todo List');
+    expect(markdown).toContain('## Verification');
+    expect(markdown).toContain('## Feature List Consistency');
+    expect(entry).toMatchObject({
+      id: 'HT-004',
+      title: 'Add sample feature',
+      status: 'not_started',
+      priority: 4,
+      layer2_refs: ['docs/features/HT-004.md']
+    });
+    expect(() => validateFeatureSpecConsistency(markdown, entry)).not.toThrow();
+  });
+
+  it('syncs feature_list.json entries without dropping existing evidence', () => {
+    const raw = JSON.stringify({
+      features: [
+        {
+          id: 'HT-004',
+          title: 'Old title',
+          status: 'blocked',
+          priority: 9,
+          layer2_refs: [],
+          evidence: [{ command: 'old', result: 'kept' }],
+          notes: 'old'
+        }
+      ]
+    });
+    const updated = JSON.parse(upsertFeatureListEntry(raw, createFeatureListEntry(featureInput)));
+    expect(updated.features[0]).toMatchObject({
+      id: 'HT-004',
+      title: 'Add sample feature',
+      status: 'not_started',
+      priority: 4,
+      layer2_refs: ['docs/features/HT-004.md'],
+      evidence: [{ command: 'old', result: 'kept' }]
+    });
+  });
+
+  it('writes docs/features and feature_list.json for a new feature', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'feature-agent-'));
+    try {
+      writeFileSync(join(cwd, 'feature_list.json'), JSON.stringify({ features: [] }), 'utf8');
+      const result = writeFeatureSpec(cwd, featureInput, 'chore: add HT-004 feature spec');
+      const writtenSpec = readFileSync(join(cwd, result.featurePath), 'utf8');
+      const writtenFeatureList = JSON.parse(readFileSync(join(cwd, 'feature_list.json'), 'utf8'));
+
+      expect(writtenSpec).toContain('# HT-004 Add sample feature');
+      expect(writtenFeatureList.features[0]).toMatchObject({
+        id: 'HT-004',
+        status: 'not_started',
+        priority: 4,
+        layer2_refs: ['docs/features/HT-004.md']
+      });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects inconsistent tracker fields and non-chore commit messages', () => {
+    const markdown = buildFeatureSpecMarkdown(featureInput);
+    expect(() =>
+      validateFeatureSpecConsistency(markdown, {
+        ...createFeatureListEntry(featureInput),
+        layer2_refs: ['docs/features/wrong.md']
+      })
+    ).toThrow('layer2_refs');
+    expect(() => validateChoreCommitMessage('feat: add feature spec')).toThrow('chore:');
+  });
+
+  it('requires archived design source for frontend feature specs', () => {
+    expect(() => buildFeatureSpecMarkdown({ ...featureInput, isFrontendProject: true })).toThrow(
+      'Figma MCP link or original design file path'
+    );
+    expect(buildFeatureSpecMarkdown({ ...featureInput, isFrontendProject: true, designSource: 'figma://file/node' })).toContain(
+      'Frontend design source: figma://file/node'
+    );
+  });
+
+  it('prints feature-agent dry-run instructions for docs, tracker sync, consistency, chore commits, and design source', () => {
+    const prompt = buildFeatureAgentDryRunPrompt();
+    expect(prompt).toContain('docs/features/<feature-id>.md');
+    expect(prompt).toContain('feature_list.json');
+    expect(prompt).toContain('consistency check');
+    expect(prompt).toContain('chore:');
+    expect(prompt).toContain('Figma MCP link');
   });
 });

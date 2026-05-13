@@ -5,12 +5,71 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-001`
+- 当前最高优先级未完成功能：`HT-002`
 - 当前唯一 active feature：`无`
 - 当前 blocker：`无`
-- 最近完成：`HT-000` 登记 Harness Template V0.1 feature specs
+- 最近完成：`HT-001` 拆分 agent bin 与 agent provider 命名
 
 ## 会话记录
+
+### Session 2026-05-13 HT-002 feature agent
+
+- 日期：2026-05-13
+- 本轮目标：按 `docs/plans/plan-2026-05-13-coder-008.md` 实现 `HT-002` feature agent；完成开发和本地验证后，将状态更新为 `pending_review` 并记录 evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`bc560fd chore: accept HT-001 reviewer gate`、`91950a5 feat: split agent provider bin handling`、`da1b6b7 chore: add agent.ts need scripts`、`9ebfd0c chore: register v0.1 feature specs`、`99b1b94 fix: 补充AGENTS.md`
+  - `./init.sh`：PASS；启动时为 `Tests  5 passed (5)`，收尾复跑为 `Tests  11 passed (11)`。
+  - Layer 1：选定唯一 active feature `HT-002`；实现前将 `feature_list.json` 中 `HT-002.status` 从 `not_started` 改为 `in_progress`。
+  - Layer 2：读取 `docs/features/HT-002-feature-agent.md`；同时读取用户指定的 `docs/plans/plan-2026-05-13-coder-008.md` 作为完整执行 prompt/context。
+- 已完成：
+  - 新增 `feature-agent.ts`：实现 feature spec markdown 生成、`docs/features/<feature-id>.md` 写入、`feature_list.json` upsert、feature id/status/priority/layer2_refs 一致性校验、`chore:` commit message 约束，以及前端项目 Figma MCP/设计稿源缺失时阻止生成。
+  - 更新 `agent.ts`：新增 `feature` runner、feature runner 参数、dry-run 输出，以及实际写入路径；dry-run 不改文件，实际写入需要 target id、title、priority 和需求文本。
+  - 更新 `package.json`：新增 `pnpm agent:feature` 脚本。
+  - 更新 `tests/setup.test.ts`：覆盖 feature spec 生成、文件写入、feature_list 同步、一致性检查、非 `chore:` 拒绝、前端设计源必填和 dry-run prompt 文案。
+  - 更新 `README.md`：记录 feature runner 用法、dry-run 语义、实际写入参数和前端设计源要求。
+  - 更新 `docs/features/HT-002-feature-agent.md`：将 HT-002 todo table 项更新为 `done`。
+  - 更新 `feature_list.json`：将 `HT-002.status` 更新为 `pending_review`，追加本轮验证 evidence；未标记为 `passing`，等待 reviewer 验收。
+- 运行过的验证：
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - `pnpm exec tsc --noEmit`：PASS；exit 0，无错误输出。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 16ms`。
+  - `pnpm agent -- --runner feature --task "Draft an atomic feature" --dry-run`：PASS；输出包含 `docs/features/<feature-id>.md`、`feature_list.json`、`consistency check`、`chore:` 和 `Figma MCP link`。
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  11 passed (11)`，随后输出标准启动命令 `pnpm    dev`。
+- 基础 smoke/e2e 路径检查：
+  - 当前项目仍无独立 e2e 路径；基础 smoke 以 `./init.sh`、`pnpm test`、`pnpm agent -- --runner feature --task "Draft an atomic feature" --dry-run` 覆盖，结果 PASS。
+- 更新过的文件或工件：
+  - `feature-agent.ts`：新增 feature agent 核心实现。
+  - `agent.ts`：新增 `feature` runner 入口和 CLI 参数。
+  - `package.json`：新增 `agent:feature` 脚本。
+  - `tests/setup.test.ts`：新增 feature agent 测试覆盖。
+  - `README.md`：补充 feature runner 文档。
+  - `docs/features/HT-002-feature-agent.md`：todo 状态更新。
+  - `feature_list.json`：`HT-002` 进入 `pending_review` 并记录 evidence。
+  - `claude-progress.md`：记录本轮修改、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - `feature` runner 的实际写入路径是本地 deterministic generator，不启动外部 provider；后续 reviewer 可决定是否还需要 Python 启动器同等能力。
+  - `./init.sh` 中 pnpm 提示 `Ignored build scripts: esbuild@0.27.7`，未影响测试或构建。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，feature runner、spec 写入、feature_list 同步、一致性校验、`chore:` 约束和前端设计源要求均已实现。
+  - 验证：2/2，已运行 `pnpm test`、`pnpm exec tsc --noEmit`、`pnpm build`、feature dry-run 和 `./init.sh`，并将 evidence 写入 `feature_list.json`。
+  - 范围纪律：2/2，本轮只围绕 `HT-002` 修改启动器、feature agent 模块、测试、README、feature spec、tracker 和进度日志。
+  - 可靠性：2/2，dry-run 非破坏性，实际写入路径会在创建前校验输入、commit 类型和 tracker 一致性。
+  - 可维护性：2/2，feature agent 逻辑集中在独立模块，CLI 只负责参数和输出，测试覆盖主要边界。
+  - 交接准备度：2/2，下一轮 reviewer 可直接从 `HT-002` 的 `pending_review` evidence 和本记录开始验收。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  11 passed (11)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 16ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入和最终状态检查后执行；实际 commit hash 由最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-002.status` 已更新为 `pending_review`，未标记为 `passing`；`HT-003` 仍为 `not_started`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；Python 启动器同等 feature runner 能力作为 reviewer 可评估风险记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 运行 reviewer 接受门：`pnpm agent:reviewer -- --feature HT-002 --dry-run` 或直接审查本轮 diff 与 evidence；若接受，将 `HT-002` 从 `pending_review` 更新为 `passing` 并记录 reviewer evidence。
 
 ### Session 2026-05-13 HT-001 reviewer acceptance
 

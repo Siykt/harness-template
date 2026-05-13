@@ -9,7 +9,7 @@
 - 用 `AGENTS.md` 和 `CONTEXT-GATE.md` 固化每轮会话协议。
 - 用 `feature_list.json` 跟踪功能队列，并约束同一时间只有一个 active feature。
 - 用 `claude-progress.md` 记录已验证状态、会话日志、blocker 和重启路径。
-- 提供 dispatcher / coder / reviewer 三种 runner，并通过 agent provider 注册表选择执行后端。
+- 提供 feature / dispatcher / coder / reviewer runner，并通过 agent provider 注册表选择执行后端。
 - 通过 `init.sh`、`pnpm test`、`pnpm build` 留下可运行验证证据。
 - 通过 `evaluator-rubric.md` 和 `clean-state-checklist.md` 做结束前自审。
 
@@ -91,6 +91,7 @@ V0.1 注册的 provider 为 `codex`、`claude`、`openharness`、`kimi`、`gemin
 
 ```bash
 pnpm agent -- --task "Add README usage docs"
+pnpm agent:feature -- --task "Draft an atomic feature" --dry-run
 pnpm agent:coder -- --feature F001 --task "Implement the selected feature"
 pnpm agent:reviewer -- --feature F001
 pnpm agent:dispatch -- --dry-run
@@ -103,7 +104,7 @@ pnpm agent:loop -- --max-loop-iterations 3
 | --- | --- |
 | `--feature`, `-f` | 指定 feature id。 |
 | `--task`, `-t` | 指定本轮任务。 |
-| `--runner` | 选择 `coder`、`reviewer` 或 `dispatcher`。 |
+| `--runner` | 选择 `feature`、`coder`、`reviewer` 或 `dispatcher`。 |
 | `--layer2-ref` | 额外加载一份 Layer 2 上下文文档。 |
 | `--skip-init` | 跳过 `./init.sh` preflight。 |
 | `--dry-run` | 只写 plan 并打印 provider 命令，不启动 provider。 |
@@ -112,6 +113,8 @@ pnpm agent:loop -- --max-loop-iterations 3
 | `--agent-provider` | 指定 provider，默认 `codex`。 |
 | `--agent-bin` | 指定 provider 可执行文件。 |
 | `--codex-bin` | Codex provider 的 legacy alias；新用法应使用 `--agent-bin`。 |
+
+Feature runner 用于登记新的 atomic feature。dry-run 会输出写入 `docs/features`、同步 `feature_list.json`、一致性检查、`chore:` 提交约束和前端设计源归档要求；实际写入时使用 `--new-feature-id`、`--feature-title`、`--feature-priority`，前端功能还需 `--frontend-project --design-source <figma-or-file>`。
 
 Python 启动器也提供同样的工作流：
 

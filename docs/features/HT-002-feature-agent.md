@@ -14,12 +14,12 @@ Feature agent 生成的 feature 文档必须把自然语言需求与 table todo 
 
 | ID | Todo | Acceptance | Status |
 | --- | --- | --- | --- |
-| `HT-002-T1` | 增加 `feature` runner / agent 入口。 | CLI 能选择 feature agent，并生成面向 atomic feature 编写的 prompt 或 dry-run 输出。 | `todo` |
-| `HT-002-T2` | 让 feature agent 写入 `docs/features/<feature-id>.md`。 | 文档包含需求、table todo list、验证要求和 feature_list consistency 区块。 | `todo` |
-| `HT-002-T3` | 让 feature agent 同步更新 `feature_list.json`。 | 新 feature 含 `id`、`title`、`status`、`priority`、`layer2_refs`，且 `layer2_refs` 指向对应 feature 文档。 | `todo` |
-| `HT-002-T4` | 校验 table todo list 与 `feature_list.json` 的一致性。 | 至少校验 feature id、状态、优先级、layer2_refs；不一致时阻止 passing 或给出明确 blocker。 | `todo` |
-| `HT-002-T5` | 强制 feature agent 的提交类型为 `chore`。 | 生成的提交建议或自动提交路径只允许 `chore:` 前缀；测试覆盖非 chore 被拒绝。 | `todo` |
-| `HT-002-T6` | 前端项目要求设计源归档。 | 检测或声明为前端项目时，feature spec 必须记录 Figma MCP 链接或设计稿原件路径；缺失时标记 blocker。 | `todo` |
+| `HT-002-T1` | 增加 `feature` runner / agent 入口。 | CLI 能选择 feature agent，并生成面向 atomic feature 编写的 prompt 或 dry-run 输出。 | `done` |
+| `HT-002-T2` | 让 feature agent 写入 `docs/features/<feature-id>.md`。 | 文档包含需求、table todo list、验证要求和 feature_list consistency 区块。 | `done` |
+| `HT-002-T3` | 让 feature agent 同步更新 `feature_list.json`。 | 新 feature 含 `id`、`title`、`status`、`priority`、`layer2_refs`，且 `layer2_refs` 指向对应 feature 文档。 | `done` |
+| `HT-002-T4` | 校验 table todo list 与 `feature_list.json` 的一致性。 | 至少校验 feature id、状态、优先级、layer2_refs；不一致时阻止 passing 或给出明确 blocker。 | `done` |
+| `HT-002-T5` | 强制 feature agent 的提交类型为 `chore`。 | 生成的提交建议或自动提交路径只允许 `chore:` 前缀；测试覆盖非 chore 被拒绝。 | `done` |
+| `HT-002-T6` | 前端项目要求设计源归档。 | 检测或声明为前端项目时，feature spec 必须记录 Figma MCP 链接或设计稿原件路径；缺失时标记 blocker。 | `done` |
 
 ## Verification
 
@@ -37,4 +37,3 @@ Feature agent 生成的 feature 文档必须把自然语言需求与 table todo 
 | `status` | `not_started` until implementation begins; then exactly one active feature may become `in_progress` |
 | `priority` | `2` |
 | `layer2_refs` | `["docs/features/HT-002-feature-agent.md"]` |
-

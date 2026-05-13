@@ -7,6 +7,7 @@
     "agent": "tsx agent.ts",
     "agent:coder": "tsx agent.ts --runner coder",
     "agent:reviewer": "tsx agent.ts --runner reviewer",
+    "agent:feature": "tsx agent.ts --runner feature",
     "agent:dispatch": "tsx agent.ts --runner dispatcher",
     "agent:loop": "tsx agent.ts --runner dispatcher --loop",
     "build": "tsup",
