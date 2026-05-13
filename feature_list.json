@@ -74,7 +74,7 @@
     {
       "id": "HT-001",
       "title": "拆分 agent bin 与 agent provider 命名",
-      "status": "pending_review",
+      "status": "passing",
       "priority": 1,
       "layer2_refs": [
         "docs/features/HT-001-agent-bin-split.md"
@@ -99,6 +99,11 @@
           "date": "2026-05-13",
           "command": "python3 agent.py --task smoke --dry-run --skip-init",
           "result": "PASS: Python launcher printed agentProvider=codex agentBin=codex and generated the same provider-neutral codex command path."
+        },
+        {
+          "date": "2026-05-13",
+          "command": "reviewer inspection + pnpm test + pnpm build + pnpm agent -- --task \"smoke\" --dry-run + python3 agent.py --task smoke --dry-run --skip-init --agent-provider claude",
+          "result": "PASS: reviewer accepted HT-001. Implementation matches the provider registry, provider-neutral bin, codex command builder, unsupported provider stub, and legacy alias requirements; vitest 1 file / 5 tests passed; build succeeded; codex dry-run printed agentProvider=codex agentBin=codex; claude provider returned the expected registered-but-not-executable error."
         }
       ],
       "notes": "已将 agent provider / bin 选择模块化；TypeScript 与 Python 均登记 codex、claude、openharness、kimi、gemini。当前仅 codex provider 支持执行，其他 provider 明确返回 unsupported stub。新参数为 --agent-provider 和 --agent-bin，--codex-bin/--oh-bin 保留为 codex legacy alias。"

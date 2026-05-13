@@ -12,6 +12,59 @@
 
 ## 会话记录
 
+### Session 2026-05-13 HT-001 reviewer acceptance
+
+- 日期：2026-05-13
+- 本轮目标：按 `docs/plans/plan-2026-05-13-reviewer-001.md` 对 `HT-001` 做严格 acceptance gate；若可接受，将状态从 `pending_review` 更新为 `passing` 并记录 reviewer evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`91950a5 feat: split agent provider bin handling`、`da1b6b7 chore: add agent.ts need scripts`、`9ebfd0c chore: register v0.1 feature specs`、`99b1b94 fix: 补充AGENTS.md`、`97820f1 docs: add project readme`
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  5 passed (5)`。
+  - Layer 1：选定唯一 active review feature `HT-001`，当前状态 `pending_review`。
+  - Layer 2：读取 `docs/features/HT-001-agent-bin-split.md`。
+- 已完成：
+  - 审查 `agent-providers.ts`：确认 TypeScript provider registry 包含 `codex`、`claude`、`openharness`、`kimi`、`gemini`；codex provider 构建当前 exec 命令，非 codex provider 返回明确 unsupported stub。
+  - 审查 `agent/providers.py` 与 `agent/core.py`：确认 Python 启动器具备同语义 provider 列表、`--agent-provider` / `--agent-bin` 参数、codex legacy alias 约束和 provider command builder。
+  - 审查 `agent.ts` 与 `tests/setup.test.ts`：确认 CLI 使用 provider-neutral `agentProvider` / `agentBin`，`--codex-bin` / `--oh-bin` 仅作为 codex legacy alias；测试覆盖 provider 列表、codex command path、unsupported stub、默认 agent bin 和 legacy alias。
+  - 更新 `feature_list.json`：将 `HT-001.status` 从 `pending_review` 改为 `passing`，追加 reviewer acceptance evidence。
+  - 更新 `claude-progress.md`：记录本轮 reviewer 检查、验证、rubric 和 clean-state checklist。
+- 运行过的验证：
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  5 passed (5)`。
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  5 passed (5)`。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 6ms`。
+  - `pnpm agent -- --task "smoke" --dry-run`：PASS；输出 `agentProvider=codex agentBin=codex`，生成 `docs/plans/plan-2026-05-13-coder-007.md`，命令为 `codex "--ask-for-approval" "never" "exec" ...`。
+  - `python3 agent.py --task smoke --dry-run --skip-init --agent-provider claude`：PASS；预期失败路径，exit 1，输出 `Agent provider claude (Claude) is registered but not executable yet. Use --agent-provider codex for the current supported execution path.`
+  - `rg "codexBin|--codex-bin|Codex" -n`：PASS；剩余结果仅在 codex provider、legacy alias 测试/兼容说明、README/feature 文档、历史进度和 Codex runner prompt 文案中。
+- 基础 smoke/e2e 路径检查：
+  - 当前项目仍无独立 e2e 路径；基础 smoke 以 `./init.sh`、`pnpm test`、`pnpm agent -- --task "smoke" --dry-run` 覆盖，结果 PASS。
+- 更新过的文件或工件：
+  - `feature_list.json`：`HT-001` reviewer 验收通过，状态更新为 `passing`，追加 review evidence。
+  - `claude-progress.md`：记录本轮 reviewer 验收、验证、rubric 和 checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - `claude`、`openharness`、`kimi`、`gemini` 仍按 V0.1 要求仅登记为 provider，未实现执行能力；调用时明确返回 unsupported。
+  - `./init.sh` 中 pnpm 提示 `Ignored build scripts: esbuild@0.27.7`，未影响测试或构建。
+  - reviewer dry-run 新生成 `docs/plans/plan-2026-05-13-coder-007.md`；该计划文件为启动器 dry-run 输出工件，当前未纳入 git 跟踪。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，`HT-001` 的 provider registry、provider-neutral bin 参数、codex command builder、unsupported stubs、legacy alias 和 dry-run 路径均符合验收表。
+  - 验证：2/2，已运行 `./init.sh`、`pnpm test`、`pnpm build`、TypeScript codex dry-run、Python unsupported-provider 检查和 grep 范围检查。
+  - 范围纪律：2/2，本轮仅做 reviewer 检查并更新 tracker/progress 文件，未修改生产代码。
+  - 可靠性：2/2，默认 codex 路径和 unsupported provider 路径可重跑，feature evidence 已写入仓库文件。
+  - 可维护性：2/2，provider 逻辑拆分清楚，测试覆盖当前支持边界，文档与 feature 状态一致。
+  - 交接准备度：2/2，下一轮可直接从 `HT-002` 开始或复查本 commit。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  5 passed (5)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 6ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入和验证后执行；实际 commit hash 由最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-001.status` 已更新为 `passing`，后续 `HT-002`、`HT-003` 仍为 `not_started`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；非 codex provider 明确为 unsupported stub。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 从 `HT-002` 开始实现 feature agent，加载 `docs/features/HT-002-feature-agent.md` 作为 Layer 2。
+
 ### Session 2026-05-13 HT-001 agent provider split
 
 - 日期：2026-05-13
