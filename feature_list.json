@@ -1,6 +1,6 @@
 {
   "project": "harness-template",
-  "last_updated": "2026-05-13",
+  "last_updated": "2026-05-14",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -186,6 +186,62 @@
         }
       ],
       "notes": "新增模块化 GitHub Actions e2e workflow 和本地 pnpm e2e dry-run 脚本；覆盖默认 Codex provider、显式 Codex provider、feature agent dry-run，不引入 Playwright、Docker 服务或外部 API。"
+    },
+    {
+      "id": "HT-004",
+      "title": "修复 Agent 重复读取上下文和重复 Init",
+      "status": "not_started",
+      "priority": 4,
+      "dependsOn": [],
+      "layer2_refs": [
+        "docs/features/HT-004-run-context-preflight-cache.md"
+      ],
+      "evidence": [
+        {
+          "date": "2026-05-14",
+          "command": "feature spec registration",
+          "result": "PENDING: requirement documented for design discussion before implementation; no production code changed."
+        }
+      ],
+      "notes": "需要先讨论 preflight ownership 设计，避免 agent.ts 和子 agent 在同一次 runner 调用中重复读取 CONTEXT-GATE.md 或重复执行 ./init.sh。"
+    },
+    {
+      "id": "HT-005",
+      "title": "使用 Git Worktree 执行 Agent Runner 并集中状态更新",
+      "status": "not_started",
+      "priority": 5,
+      "dependsOn": [],
+      "layer2_refs": [
+        "docs/features/HT-005-worktree-runner-status-owner.md"
+      ],
+      "evidence": [
+        {
+          "date": "2026-05-14",
+          "command": "feature spec registration",
+          "result": "PENDING: requirement documented; implementation must use worktrees and make agent.ts the owner of feature status updates."
+        }
+      ],
+      "notes": "子 agent 只输出临时变更指导或 result JSON，运行结束后由 agent.ts 校验并更新 feature_list 状态。"
+    },
+    {
+      "id": "HT-006",
+      "title": "使用 DAG 支持并行执行",
+      "status": "not_started",
+      "priority": 6,
+      "dependsOn": [
+        "HT-005"
+      ],
+      "layer2_refs": [
+        "docs/features/HT-006-dag-parallel-dispatcher.md"
+      ],
+      "evidence": [
+        {
+          "date": "2026-05-14",
+          "command": "feature spec registration",
+          "result": "PENDING: requirement documented; dispatcher must select all ready not_started features whose dependsOn entries are passing."
+        }
+      ],
+      "notes": "DAG 并发依赖 worktree runner 和 agent.ts 集中状态更新，避免并发 agent 共享 checkout 或直接竞争 feature_list 写入。"
     }
   ]
 }

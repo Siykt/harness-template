@@ -445,6 +445,57 @@
 - 下一步最佳动作：
   - 若继续完善模板，可补充一个示例 `feature_list.json` feature 或 `docs/context` 示例文档；当前 README 工作无需继续处理。
 
+### Session 2026-05-14 HT-004-HT-006 feature registration
+
+- 日期：2026-05-14
+- 本轮目标：按用户要求登记三项新 feature：修复重复 preflight/init、git worktree runner + agent.ts 状态 owner、DAG 并发 dispatcher。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`b4627ae`、`93c9d18`、`e2f1a90`、`7881207`、`a731be5`
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  11 passed (11)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：当前最高优先级未完成功能为无；本轮只登记新 feature 规格，不进入生产实现。
+- 已完成：
+  - 新增 `docs/features/HT-004-run-context-preflight-cache.md`，记录重复读取 `CONTEXT-GATE.md`、重复执行 `./init.sh` 的设计问题、推荐方向和待讨论问题。
+  - 新增 `docs/features/HT-005-worktree-runner-status-owner.md`，记录 git worktree runner、临时 result JSON、禁止子 agent 直接更新 feature 状态、由 `agent.ts` 统一落库状态。
+  - 新增 `docs/features/HT-006-dag-parallel-dispatcher.md`，记录 `dependsOn` DAG、ready pool 选择、并发池、依赖异常处理和验证要求。
+  - 更新 `feature_list.json`：登记 `HT-004`、`HT-005`、`HT-006`，状态均为 `not_started`；`HT-006.dependsOn` 为 `["HT-005"]`。
+- 运行过的验证：
+  - `node -e feature registration consistency check`：PASS，`HT-004`、`HT-005`、`HT-006` 均存在，状态为 `not_started`，layer2_refs 指向实际文档。
+  - `pnpm test`：PASS，`Test Files  1 passed (1)`、`Tests  11 passed (11)`。
+  - `pnpm build`：PASS，输出含 `ESM dist/index.mjs 76.00 B`、`ESM ⚡️ Build success in 6ms`。
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh`：PASS，覆盖基础 vitest smoke 路径；本轮无生产代码或 e2e 路径变更。
+- 更新过的文件或工件：
+  - `docs/features/HT-004-run-context-preflight-cache.md`：新增待讨论设计 feature。
+  - `docs/features/HT-005-worktree-runner-status-owner.md`：新增 worktree runner/status owner feature。
+  - `docs/features/HT-006-dag-parallel-dispatcher.md`：新增 DAG 并发 dispatcher feature。
+  - `feature_list.json`：新增三条 not_started feature、layer2_refs、evidence 和 `dependsOn`。
+  - `claude-progress.md`：记录本轮修改、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - `HT-004` 明确需要先讨论设计方案，当前只完成规格登记。
+  - `HT-004`、`HT-005`、`HT-006` 均未实现，状态保持 `not_started`。
+  - `./init.sh` 中 pnpm 仍提示 `Ignored build scripts: esbuild@0.27.7`，未影响测试或构建。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，已按用户要求把三项新 feature 写入 `docs/features`，并同步登记到 `feature_list.json`。
+  - 验证：2/2，已运行一致性检查、`pnpm test`、`pnpm build` 和本轮启动时 `./init.sh`。
+  - 范围纪律：2/2，仅新增 feature 规格、清单和进度记录，未改生产实现。
+  - 可靠性：2/2，新 feature 均有独立 Layer 2 文档、状态、优先级、依赖和 evidence。
+  - 可维护性：2/2，文档包含 requirement、todo table、verification 和 feature_list consistency。
+  - 交接准备度：2/2，下一轮可直接围绕 `HT-004` 讨论设计或实现 `HT-005`。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后输出含 `Test Files  1 passed (1)`、`Tests  11 passed (11)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出含 `ESM ⚡️ Build success in 6ms`。
+  - PASS 本轮变更已 git commit：已执行 `git commit --amend --no-edit`；最终 `git log --oneline -1` 输出由本轮最终回复给出，避免把会随 amend 改变的提交哈希写进提交正文。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-004`、`HT-005`、`HT-006` 均为 `not_started`。
+  - PASS 没有任何半成品步骤处于未记录状态：三项实现项均为未开始，`HT-004` 的设计讨论要求已记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 先讨论 `HT-004` 的 preflight ownership 设计，确认 `agent.ts` 生成的 evidence 如何被子 agent 视为已完成启动协议。
+  - 可并行规划 `HT-005`，因为它与 `HT-004` 无 feature_list 依赖；`HT-006` 依赖 `HT-005`。
+
 ### Session template
 
 - 日期：
