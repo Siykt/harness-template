@@ -190,7 +190,7 @@
     {
       "id": "HT-004",
       "title": "修复 Agent 重复读取上下文和重复 Init",
-      "status": "pending_review",
+      "status": "blocked",
       "priority": 4,
       "dependsOn": [],
       "layer2_refs": [
@@ -226,9 +226,14 @@
           "date": "2026-05-14",
           "command": "./init.sh",
           "result": "PASS: vitest run 1 file / 14 tests passed; init.sh completed without errors."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "reviewer acceptance: pnpm exec tsc --noEmit + pnpm test + pnpm build + pnpm agent -- --runner coder --feature HT-004 --task \"smoke\" --dry-run + rg generated plan",
+          "result": "BLOCKED: implementation generates preflight evidence and passes local checks, but docs/plans/plan-2026-05-14-coder-004.md records Layer 1 latest session as `Session template` instead of the most recent actual session. This violates the startup protocol requiring claude-progress.md current verified status plus the recent 1 session record. Tests also do not cover the required failed-init evidence path."
         }
       ],
-      "notes": "已实现 dispatcher 层 context cache、run-scoped preflight evidence manifest 和 cache-friendly runner prompt。子 agent 被要求复用 harness preflight，只有证据缺失、失败、被修改失效或用户明确要求时才重跑完整启动流程。"
+      "notes": "BLOCKED by reviewer: context cache and preflight manifest exist, but Layer 1 progress summary extraction is incorrect when claude-progress.md ends with `### Session template`; generated runner plans lose the actual latest session evidence. Restart by fixing extractCurrentStatusAndLatestSession to ignore the template and select the latest non-template session, adding regression coverage for that case and failed-init evidence visibility, then rerun tsc/test/build/dry-run."
     },
     {
       "id": "HT-005",

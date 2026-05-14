@@ -507,6 +507,60 @@
 - 下一步最佳动作：
   - 若继续完善模板，可补充一个示例 `feature_list.json` feature 或 `docs/context` 示例文档；当前 README 工作无需继续处理。
 
+### Session 2026-05-14 HT-004 reviewer acceptance gate
+
+- 日期：2026-05-14
+- 本轮目标：按 `docs/plans/plan-2026-05-14-reviewer-001.md` 对 `HT-004` 做严格 reviewer acceptance gate；若证据和实现可接受则标记 passing，否则标记 blocked。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`，并按用户要求读取 `docs/plans/plan-2026-05-14-reviewer-001.md`
+  - `git log --oneline -5`：`0437f28`、`ca578d5`、`b4627ae`、`93c9d18`、`e2f1a90`
+  - `./init.sh`：PASS，最后输出含 `Tests  14 passed (14)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：选定唯一 active feature `HT-004`，原状态为 `pending_review`。
+  - Layer 2：读取 `docs/features/HT-004-run-context-preflight-cache.md`。
+- 已完成：
+  - 审查 `agent.ts` 中 context summary cache、preflight evidence manifest、runner prompt、dispatcher dry-run 路径。
+  - 审查 `tests/setup.test.ts` 中 HT-004 相关测试覆盖。
+  - 运行 reviewer 验证后判定不接受：dry-run 生成的 `docs/plans/plan-2026-05-14-coder-004.md` 中 `Layer 1: claude-progress.md summary` 的 `latest session` 被解析为 `### Session template`，而不是最近实际会话记录。
+  - 将 `feature_list.json` 中 `HT-004.status` 从 `pending_review` 更新为 `blocked`，并追加 blocked evidence 与 restart instructions。
+- 运行过的验证：
+  - `pnpm exec tsc --noEmit`：PASS，exit 0。
+  - `pnpm test`：PASS，`Test Files  1 passed (1)`、`Tests  14 passed (14)`。
+  - `pnpm build`：PASS，输出末行 `ESM ⚡️ Build success in 5ms`；状态更新后复跑 `pnpm build` 也 PASS，输出末行 `ESM ⚡️ Build success in 6ms`。
+  - `pnpm agent -- --runner coder --feature HT-004 --task "smoke" --dry-run`：PASS，生成 `.harness/runs/2026-05-14T115452-337Z-HT-004-coder/preflight.json` 和 `docs/plans/plan-2026-05-14-coder-004.md`。
+  - `rg "latest session|Session template|HT-004 coder implementation|Stable Harness Contract|Do not repeat the full startup protocol|Preflight Evidence Summary|每轮会话开始时" docs/plans/plan-2026-05-14-coder-004.md`：FAIL for acceptance，输出包含 `285:--- latest session ---` 与 `286:### Session template`，未包含最近实际 `HT-004 coder implementation` 会话。
+  - `python3 preflight JSON inspection`：PASS，preflight JSON schema 为 1、featureId 为 `HT-004`、runner 为 `coder`、init exit 为 0、Layer 2 指向 `docs/features/HT-004-run-context-preflight-cache.md`。
+  - `./init.sh`：PASS，状态更新后复跑，最后输出含 `Tests  14 passed (14)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` PASS；`pnpm agent -- --runner coder --feature HT-004 --task "smoke" --dry-run` 能生成 plan 和 preflight evidence，但 generated plan 暴露 Layer 1 latest-session 摘要错误，因此 HT-004 不通过验收。
+- 更新过的文件或工件：
+  - `feature_list.json`：`HT-004` 标记为 `blocked`，追加 reviewer blocked evidence 和重启路径。
+  - `claude-progress.md`：记录本轮 reviewer 验收、验证、blocker、rubric 和 clean-state checklist。
+  - `.harness/runs/2026-05-14T115452-337Z-HT-004-coder/preflight.json`、`docs/plans/plan-2026-05-14-coder-004.md`：dry-run 验收工件。
+- 已知风险或未解决问题：
+  - BLOCKER：`extractCurrentStatusAndLatestSession` 使用最后一个 `### Session`，当文件末尾保留 `### Session template` 时会把模板当成最近会话，导致下游 runner plan 丢失最近实际会话证据。
+  - BLOCKER：HT-004 规格要求 `pnpm test` 覆盖失败证据传递；当前新增测试只覆盖 feature_list 摘要瘦身、hash-keyed cache 和 preflight reuse prompt contract，未覆盖 failed-init evidence visibility。
+  - 重启路径：修复 `extractCurrentStatusAndLatestSession` 跳过 `### Session template` 并选择最近非模板 session；新增回归测试覆盖模板存在时的 latest-session 选择和 `./init.sh` 失败 evidence 出现在 plan/preflight；复跑 `pnpm exec tsc --noEmit`、`pnpm test`、`pnpm build`、`pnpm agent -- --runner coder --feature HT-004 --task "smoke" --dry-run`。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：1/2，preflight/cache/prompt 主路径存在，但 Layer 1 最近会话摘要错误，未满足仓库启动协议。
+  - 验证：1/2，tsc/test/build/dry-run 已跑且多数通过，但 required failed-init evidence 测试缺失，dry-run plan 暴露验收失败证据。
+  - 范围纪律：2/2，本轮 reviewer 仅修改 tracker 和进度记录，未改生产实现。
+  - 可靠性：1/2，preflight evidence 可审计，但进度摘要在常见模板尾部结构下不可靠。
+  - 可维护性：1/2，blocker 和重启路径明确，但实现需补测试与解析逻辑。
+  - 交接准备度：2/2，`feature_list.json` 已标记 blocked，下一轮可直接修复两个 blocker。
+  - 结论：Block。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  14 passed (14)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 6ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入后执行；最终 `git log --oneline -1` 输出由本轮最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、blocker、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-004.status` 为 `blocked`，未标记 passing。
+  - PASS 没有任何半成品步骤处于未记录状态：两个 blocker 均已记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 修复 `extractCurrentStatusAndLatestSession` 的 latest-session 选择逻辑，忽略 `Session template`。
+  - 补充 failed-init evidence 和 latest-session 解析回归测试后，重新将 `HT-004` 送 reviewer。
+
 ### Session 2026-05-14 HT-004-HT-006 feature registration
 
 - 日期：2026-05-14
