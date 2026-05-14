@@ -4,13 +4,59 @@
 
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
-- 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-006` blocked，reviewer gate 发现 pending_review dependency blocker 仍会被调度
+- 标准验证路径：`pnpm test`（当前实际执行为 `vitest run`）
+- 当前最高优先级未完成功能：无；`feature_list.json` 中登记功能均为 `passing`
 - 当前唯一 active feature：`无`
-- 当前 blocker：`HT-006` automatic reviewer pool 未过滤 dependency blocker
-- 最近完成：`HT-005` reviewer 验收通过，worktree runner/status owner 进入 passing；`HT-006` coder 实现已进入 reviewer，但本轮未通过验收
+- 当前 blocker：无
+- 最近完成：`README.md` 已同步最新功能说明；`HT-005` worktree runner/status owner 与 `HT-006` DAG dispatcher 均已反映到文档
 
 ## 会话记录
+
+### Session 2026-05-14 README latest feature sync
+
+- 日期：2026-05-14
+- 本轮目标：按用户要求更新 `README.md`，补充当前最新功能。
+- 启动与上下文：
+  - `pwd`：PASS，`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：PASS，最新提交包含 `951de73 chore: upd features`、`12264b1 fix: filter HT-006 reviewer dependency blockers`、`9a17597 chore: block HT-006 reviewer gate`
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  23 passed (23)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：`feature_list.json` 中 `DOC-001`、`HT-000` 到 `HT-006` 均为 `passing`；本轮选定 `DOC-001` 作为唯一文档同步 feature。
+- 已完成：
+  - 更新 `README.md` 核心能力，补充 worktree runner、`result.json` 集中状态更新、`dependsOn` DAG、dispatcher 并发池和依赖 blocker 行为。
+  - 更新 `README.md` CLI 文档，补充 `--max-concurrency`、`--loop`、`--loop-delay-ms`、`--max-loop-iterations`。
+  - 新增 README 小节 `Worktree Runner 和集中状态更新` 与 `DAG 并发调度`，说明 `.harness/worktrees`、主工作树状态 owner、reviewer/coder 池选择策略。
+  - 更新 `feature_list.json` 的 `DOC-001` evidence，记录本轮文档同步和验证。
+- 运行过的验证：
+  - `./init.sh`：PASS，vitest `Test Files  1 passed (1)`、`Tests  23 passed (23)`。
+  - `pnpm test`：PASS，vitest `Test Files  1 passed (1)`、`Tests  23 passed (23)`。
+  - `pnpm build`：PASS，输出末行 `ESM ⚡️ Build success in 5ms`。
+- 基础 smoke/e2e 路径检查：
+  - 基础 smoke path 由 `./init.sh` 和 `pnpm test` 覆盖，均 PASS；本轮仅文档与 tracker 更新，未改生产代码或 e2e 脚本。
+- 更新过的文件或工件：
+  - `README.md`：补充最新功能使用说明。
+  - `feature_list.json`：为 `DOC-001` 追加 2026-05-14 evidence。
+  - `claude-progress.md`：记录本轮修改、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker；README 反映的是当前 `feature_list.json` 与已通过测试覆盖的实现状态。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，README 已覆盖最新 passing 功能：worktree runner、集中状态 owner、DAG 依赖、dispatcher 并发与依赖 blocker。
+  - 验证：2/2，已运行 `./init.sh`、`pnpm test`、`pnpm build` 并记录输出。
+  - 范围纪律：2/2，本轮只修改 README、DOC-001 evidence 和进度日志。
+  - 可靠性：2/2，文档描述与 CLI 参数、测试覆盖和 feature evidence 保持一致。
+  - 可维护性：2/2，新小节面向使用者说明机制和边界，没有引入冗长设计细节。
+  - 交接准备度：2/2，当前状态块已更新为无 active feature、无 blocker，下一轮可直接选择新任务。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后输出含 `Test Files  1 passed (1)`、`Tests  23 passed (23)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 5ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入后执行；最终 `git log --oneline -1` 输出由本轮最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中所有登记功能均为 `passing`，本轮只追加 DOC-001 文档同步 evidence。
+  - PASS 没有任何半成品步骤处于未记录状态：本轮无未完成实现项或 blocker。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 若继续扩展模板，可登记新的 atomic feature；当前 README 与已通过功能状态一致。
 
 ### Session 2026-05-14 HT-006 reviewer dispatcher finalization
 

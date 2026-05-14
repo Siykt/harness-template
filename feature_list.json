@@ -35,9 +35,14 @@
           "date": "2026-05-12",
           "command": "pnpm build",
           "result": "PASS: tsup ESM build success, dist/index.mjs generated."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "README latest feature sync + ./init.sh + pnpm test + pnpm build",
+          "result": "PASS: README updated to document worktree runner/status owner, result.json handoff, dependsOn DAG scheduling, dispatcher concurrency, reviewer/coder pool policy, and dependency blockers. ./init.sh and pnpm test both passed with Test Files 1 passed / Tests 23 passed; pnpm build passed with ESM build success in 5ms."
         }
       ],
-      "notes": "README 已补充项目定位、目录结构、快速开始、feature 状态流、agent 启动器、上下文协议、验证与收尾要求。"
+      "notes": "README 已补充项目定位、目录结构、快速开始、feature 状态流、agent 启动器、上下文协议、验证与收尾要求；2026-05-14 已同步最新 worktree runner/status owner、result.json handoff、DAG dependsOn、dispatcher 并发池和依赖 blocker 行为。"
     },
     {
       "id": "HT-000",

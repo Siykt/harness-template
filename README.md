@@ -10,6 +10,10 @@
 - 用 `feature_list.json` 跟踪功能队列，并约束同一时间只有一个 active feature。
 - 用 `claude-progress.md` 记录已验证状态、会话日志、blocker 和重启路径。
 - 提供 feature / dispatcher / coder / reviewer runner，并通过 agent provider 注册表选择执行后端。
+- 为 runner 创建独立 Git worktree，并用 `result.json` 把子 agent 的建议状态交回主工作树统一落库。
+- 在 `feature_list.json` 中支持 `dependsOn` DAG 依赖，dispatcher 会选择所有依赖已 passing 的可运行任务。
+- 支持 dispatcher 并发池和 `--max-concurrency`，同时优先处理可审核的 `pending_review` reviewer 池。
+- 对缺失依赖、blocked 依赖和循环依赖输出明确 blocker，受影响 feature 不会被自动启动。
 - 通过 `init.sh`、`pnpm test`、`pnpm build` 留下可运行验证证据。
 - 通过 `evaluator-rubric.md` 和 `clean-state-checklist.md` 做结束前自审。
 
@@ -24,6 +28,7 @@
 | `agent.ts` | TypeScript 版 agent 启动器和 dispatcher。 |
 | `agent-providers.ts` | TypeScript 版 provider 注册表和命令构建模块。 |
 | `agent/` | Python 版启动器实现。 |
+| `.harness/` | 运行时生成的 preflight、上下文缓存、runner worktree 和 result JSON。 |
 | `init.sh` | 依赖同步和基础验证入口。 |
 | `clean-state-checklist.md` | session 结束前的干净状态检查。 |
 | `evaluator-rubric.md` | 功能验收前的自评表。 |
@@ -101,6 +106,7 @@ pnpm agent:feature -- --task "Draft an atomic feature" --dry-run
 pnpm agent:coder -- --feature F001 --task "Implement the selected feature"
 pnpm agent:reviewer -- --feature F001
 pnpm agent:dispatch -- --dry-run
+pnpm agent:dispatch -- --dry-run --max-concurrency 3
 pnpm agent:loop -- --max-loop-iterations 3
 ```
 
@@ -114,6 +120,10 @@ pnpm agent:loop -- --max-loop-iterations 3
 | `--layer2-ref` | 额外加载一份 Layer 2 上下文文档。 |
 | `--skip-init` | 跳过 `./init.sh` preflight。 |
 | `--dry-run` | 只写 plan 并打印 provider 命令，不启动 provider。 |
+| `--max-concurrency` | dispatcher 每轮最多启动的 feature 数，默认 `2`。 |
+| `--loop` | dispatcher 持续调度，直到没有可运行任务、遇到 blocker 或达到 guard。 |
+| `--loop-delay-ms` | dispatcher loop 每轮之间的等待毫秒数。 |
+| `--max-loop-iterations` | dispatcher loop 最大迭代次数；`0` 表示不设上限。 |
 | `--continue`, `-c` | 继续最近一次 provider session。 |
 | `--resume`, `-r` | 继续指定 provider session。 |
 | `--agent-provider` | 指定 provider，默认 `codex`。 |
@@ -127,6 +137,28 @@ Python 启动器也提供同样的工作流：
 ```bash
 python3 -m agent --task "Implement the next feature" --dry-run
 ```
+
+## Worktree Runner 和集中状态更新
+
+Coder / reviewer runner 会在 `.harness/worktrees/<run-id>` 下创建独立 Git worktree。生成的 plan 会同步到该 worktree，provider 也在这个隔离目录中执行，避免多个 agent 共享同一个工作目录。
+
+子 agent 不直接落库 `feature_list.json` 状态或 `claude-progress.md` 最终进度，而是在 `.harness/runs/<run-id>/result.json` 写入建议状态、验证证据和 blocker 信息。`agent.ts` 校验 result JSON 后，把非 tracker 文件的 patch 应用回主工作树，再统一更新功能状态和进度日志。成功的 worktree 会清理；失败或 blocked 的 worktree 会保留用于排查。
+
+## DAG 并发调度
+
+`feature_list.json` 的 feature 可以声明 `dependsOn`：
+
+```json
+{
+  "id": "HT-006",
+  "status": "not_started",
+  "dependsOn": ["HT-005"]
+}
+```
+
+`dependsOn` 缺省时按空数组处理。Dispatcher 会先检测依赖缺失、依赖 blocked 和循环依赖；有依赖 blocker 的 feature 不会进入执行池。
+
+自动调度时，dispatcher 会优先选择依赖已满足的 `pending_review` feature 进入 reviewer 池；如果没有 reviewer work，则选择所有 `not_started` 且依赖已全部 `passing` 的 feature 进入 coder 池，并按 `--max-concurrency` 截断本轮并发数量。`--dry-run` 会打印 ready pool、依赖状态和计划路径，不创建永久 worktree。
 
 ## 上下文加载协议
 
