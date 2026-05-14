@@ -1147,7 +1147,9 @@ function buildDispatchPool(features: FeatureSummary[], opts: CliOptions): Dispat
     };
   }
 
-  const pendingReview = features.filter(feature => feature.status === 'pending_review').sort(byPriorityThenId);
+  const pendingReview = features
+    .filter(feature => feature.status === 'pending_review' && !dependencyReason(feature))
+    .sort(byPriorityThenId);
   if (pendingReview.length > 0) {
     return {
       runner: 'reviewer',

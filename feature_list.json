@@ -296,7 +296,7 @@
     {
       "id": "HT-006",
       "title": "使用 DAG 支持并行执行",
-      "status": "blocked",
+      "status": "pending_review",
       "priority": 6,
       "dependsOn": [
         "HT-005"
@@ -329,6 +329,31 @@
           "date": "2026-05-14",
           "command": "reviewer acceptance: static inspection + pnpm exec tsc --noEmit + pnpm test + pnpm build + pnpm agent -- --runner dispatcher --dry-run + direct buildDispatchPool dependency-blocker probe",
           "result": "BLOCKED: buildDispatchPool reports dependency blockers for pending_review features but still schedules those same features in the automatic reviewer pool. Reproduction with HT-002 pending_review depending on blocked HT-001 returned decisions=[HT-002] and blockers=[HT-002: dependency HT-001 is blocked], violating HT-006's rule that missing, cyclic, or blocked dependencies must prevent affected features from starting. Existing tests do not cover this pending_review dependency-blocker path."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript type check completed with exit 0 after filtering pending_review dependency blockers from reviewer pool."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm test",
+          "result": "PASS: vitest run 1 file / 23 tests passed; added regression coverage that pending_review features with missing/blocked/cyclic dependencies are not selected for reviewer pool."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "NODE_ENV=test pnpm exec tsx -e buildDispatchPool dependency-blocker probe",
+          "result": "PASS: decisions=[], blockers=[\"HT-002: dependency HT-001 is blocked\"], proving affected pending_review feature is not dispatched."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm agent -- --runner dispatcher --dry-run",
+          "result": "PASS: current blocked-state dry-run stopped with no ready features; after this status update HT-006 is ready for reviewer re-check."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 7ms."
         }
       ],
       "blocker": {
@@ -337,7 +362,7 @@
         "evidence": "NODE_ENV=test pnpm exec tsx -e direct buildDispatchPool probe returned runner=reviewer, decisions=[HT-002], blockers=[HT-002: dependency HT-001 is blocked] for a pending_review feature depending on a blocked feature.",
         "restartInstructions": "Filter pending_review candidates with dependencyReason before scheduling reviewer decisions; ensure blocker output remains deterministic; add a regression test where a pending_review feature has a blocked, missing, or cyclic dependency and is not selected; rerun pnpm exec tsc --noEmit, pnpm test, pnpm build, and pnpm agent -- --runner dispatcher --dry-run."
       },
-      "notes": "Reviewer blocked HT-006. DAG planning handles not_started dependency blockers, but pending_review features with dependency blockers can still be scheduled into reviewer pool; fix automatic reviewer candidate filtering before acceptance."
+      "notes": "Blocked reviewer finding fixed: automatic pending_review reviewer pool now excludes features with dependency blockers, so affected features appear only in blockers and are not launched. HT-006 is ready for reviewer re-check."
     }
   ]
 }

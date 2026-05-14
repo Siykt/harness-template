@@ -600,6 +600,27 @@ describe('DAG dispatcher planning', () => {
     expect(pool.runner).toBe('reviewer');
     expect(pool.decisions.map(decision => [decision.feature.id, decision.runner])).toEqual([['HT-001', 'reviewer']]);
   });
+
+  it('does not select pending_review features with missing, blocked, or cyclic dependency blockers', () => {
+    const pool = buildDispatchPool(
+      [
+        feature('HT-001', 'blocked', 1),
+        feature('HT-002', 'pending_review', 2, ['HT-001']),
+        feature('HT-003', 'pending_review', 3, ['HT-404']),
+        feature('HT-004', 'pending_review', 4, ['HT-005']),
+        feature('HT-005', 'pending_review', 5, ['HT-004'])
+      ],
+      dispatcherOpts({ maxConcurrency: '5' })
+    );
+
+    expect(pool.decisions).toEqual([]);
+    expect(pool.blockers.map(blocker => `${blocker.feature.id}: ${blocker.reason}`)).toEqual([
+      'HT-002: dependency HT-001 is blocked',
+      'HT-003: missing dependency HT-404',
+      'HT-004: dependency cycle includes HT-004',
+      'HT-005: dependency cycle includes HT-005'
+    ]);
+  });
 });
 
 describe('feature agent', () => {
