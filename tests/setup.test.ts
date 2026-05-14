@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { agentProviderIds, buildProviderCommand } from '../agent-providers';
 import {
+  buildDispatchPool,
   buildPrompt,
   extractCurrentStatusAndLatestSession,
   planRunnerWorktree,
@@ -507,6 +508,97 @@ describe('runner context cache and preflight prompt', () => {
         { runId: 'run-HT-005-reviewer', featureId: 'HT-005', runner: 'reviewer' }
       )
     ).toThrow('blocked runner result');
+  });
+});
+
+describe('DAG dispatcher planning', () => {
+  type DispatchOpts = Parameters<typeof buildDispatchPool>[1];
+  const dispatcherOpts = (overrides: Record<string, unknown> = {}) =>
+    ({
+      runner: 'dispatcher',
+      dryRun: true,
+      loop: false,
+      maxConcurrency: '2',
+      layer2Refs: [],
+      task: undefined,
+      feature: undefined,
+      ...overrides
+    }) as unknown as DispatchOpts;
+
+  const feature = (
+    id: string,
+    status: string,
+    priority: number,
+    dependsOn: string[] = []
+  ) => ({
+    id,
+    title: `${id} title`,
+    status,
+    priority,
+    dependsOn,
+    layer2Refs: [`docs/features/${id}.md`]
+  });
+
+  it('returns every not_started feature whose dependencies are passing, capped by max concurrency', () => {
+    const pool = buildDispatchPool(
+      [
+        feature('HT-001', 'passing', 1),
+        feature('HT-002', 'not_started', 2, ['HT-001']),
+        feature('HT-003', 'not_started', 3, ['HT-001']),
+        feature('HT-004', 'not_started', 4, ['HT-001'])
+      ],
+      dispatcherOpts({ maxConcurrency: '2' })
+    );
+
+    expect(pool.runner).toBe('coder');
+    expect(pool.decisions.map(decision => decision.feature.id)).toEqual(['HT-002', 'HT-003']);
+    expect(pool.maxConcurrency).toBe(2);
+  });
+
+  it('keeps not_started features waiting until dependencies pass', () => {
+    const pool = buildDispatchPool(
+      [feature('HT-001', 'not_started', 1), feature('HT-002', 'not_started', 2, ['HT-001'])],
+      dispatcherOpts()
+    );
+
+    expect(pool.decisions.map(decision => decision.feature.id)).toEqual(['HT-001']);
+    expect(pool.waiting).toEqual([
+      expect.objectContaining({
+        feature: expect.objectContaining({ id: 'HT-002' }),
+        reason: expect.stringContaining('HT-001')
+      })
+    ]);
+  });
+
+  it('reports missing, blocked, and cyclic dependency blockers without selecting affected features', () => {
+    const pool = buildDispatchPool(
+      [
+        feature('HT-001', 'blocked', 1),
+        feature('HT-002', 'not_started', 2, ['HT-404']),
+        feature('HT-003', 'not_started', 3, ['HT-001']),
+        feature('HT-004', 'not_started', 4, ['HT-005']),
+        feature('HT-005', 'not_started', 5, ['HT-004'])
+      ],
+      dispatcherOpts({ maxConcurrency: '5' })
+    );
+
+    expect(pool.decisions).toEqual([]);
+    expect(pool.blockers.map(blocker => `${blocker.feature.id}: ${blocker.reason}`)).toEqual([
+      'HT-002: missing dependency HT-404',
+      'HT-003: dependency HT-001 is blocked',
+      'HT-004: dependency cycle includes HT-004',
+      'HT-005: dependency cycle includes HT-005'
+    ]);
+  });
+
+  it('uses a reviewer pool before mixing in coder work', () => {
+    const pool = buildDispatchPool(
+      [feature('HT-001', 'pending_review', 1), feature('HT-002', 'not_started', 2)],
+      dispatcherOpts()
+    );
+
+    expect(pool.runner).toBe('reviewer');
+    expect(pool.decisions.map(decision => [decision.feature.id, decision.runner])).toEqual([['HT-001', 'reviewer']]);
   });
 });
 

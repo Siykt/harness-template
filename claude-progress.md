@@ -5,12 +5,65 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-006` not_started，等待启动 DAG parallel dispatcher
+- 当前最高优先级未完成功能：`HT-006` pending_review，等待 reviewer 验收 DAG parallel dispatcher
 - 当前唯一 active feature：`无`
 - 当前 blocker：`无`
-- 最近完成：`HT-005` reviewer 验收通过，worktree runner/status owner 进入 passing；`HT-004` reviewer 验收通过，runner preflight/context cache 进入 passing
+- 最近完成：`HT-006` coder 实现完成并进入 pending_review；`HT-005` reviewer 验收通过，worktree runner/status owner 进入 passing
 
 ## 会话记录
+
+### Session 2026-05-14 HT-006 coder implementation
+
+- 日期：2026-05-14
+- 本轮目标：按 `docs/plans/plan-2026-05-14-coder-011.md` 实现 `HT-006` DAG parallel dispatcher；完成后将 feature 更新为 `pending_review` 并记录 evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`88cc8c0`、`4fbb371`、`0a60a2f`、`64ec792`、`5de2340`
+  - `./init.sh`：PASS，启动时输出含 `Test Files  1 passed (1)`、`Tests  18 passed (18)`、`pnpm    dev`
+  - Layer 1：选定唯一 active feature `HT-006`，初始状态 `not_started`。
+  - Layer 2：使用用户指定 plan 中 routed doc `docs/features/HT-006-dag-parallel-dispatcher.md`。
+- 已完成：
+  - 修改 `agent.ts`：新增 `dependsOn` DAG planning，缺省依赖按 `[]` 处理；缺失依赖、blocked 依赖、循环依赖输出明确 dependency blocker。
+  - 修改 `agent.ts`：dispatcher 自动扫描所有 ready feature；`pending_review` 形成 reviewer pool，`not_started` 且依赖全 passing 形成 coder pool，默认不混跑 runner 类型。
+  - 修改 `agent.ts`：新增 `--max-concurrency`，默认 `2`；同一 pool 内的非 dry-run runner 使用独立 worktree/run id 并发执行，dry-run 顺序生成 plan 以保持编号确定。
+  - 修改 `agent.ts`：dry-run 输出 ready pool、maxConcurrency、每个待调度 feature 的 dependency status 和 planned strategy。
+  - 修改 `tests/setup.test.ts`：新增 DAG dispatcher planning 测试，覆盖 ready pool、依赖等待、missing dependency、blocked dependency、cycle detection、max concurrency、reviewer/coder pool 分离。
+  - 更新 `feature_list.json`：将 `HT-006.status` 从 `not_started` 更新为 `pending_review`，追加本轮验证 evidence。
+- 运行过的验证：
+  - `pnpm exec tsc --noEmit`：PASS，exit 0。
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  22 passed (22)`。
+  - `pnpm agent -- --runner dispatcher --dry-run`：PASS；输出含 `runner=coder readyPool=HT-006 maxConcurrency=2`、`HT-006 dependsOn=[HT-005:passing]`，并生成 `docs/plans/plan-2026-05-14-coder-013.md`。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 11ms`。
+  - `./init.sh`：PASS；最后输出含 `Tests  22 passed (22)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` PASS；dispatcher dry-run PASS，确认当前 `HT-006` 因 `HT-005:passing` 进入 coder ready pool。
+- 更新过的文件或工件：
+  - `agent.ts`：DAG dependency validation、ready pool planning、max concurrency option、parallel pool execution、dry-run dependency status output。
+  - `tests/setup.test.ts`：新增 HT-006 DAG dispatcher planning 单测。
+  - `feature_list.json`：`HT-006` 更新为 `pending_review` 并追加 evidence。
+  - `claude-progress.md`：记录本轮实现、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - 本轮未启动真实 provider 并发长时任务；验收依据为单测、类型检查、build、init smoke 和 dispatcher dry-run。真实并发依赖 HT-005 worktree/status-owner 路径，已由前序 passing feature 提供基础。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，DAG ready pool、依赖 blocker、runner 类型分池和 max concurrency 均已实现。
+  - 验证：2/2，已运行 tsc、vitest、dispatcher dry-run、build 和 init smoke，测试覆盖 HT-006 要求的主要依赖边界。
+  - 范围纪律：2/2，生产代码变更集中在 `agent.ts` dispatcher；测试集中在 `tests/setup.test.ts`；tracker/progress 仅记录 HT-006 状态。
+  - 可靠性：2/2，dry-run 编号确定；非 dry-run pool 仍通过 HT-005 的独立 worktree/run id/result JSON/status owner 路径收敛。
+  - 可维护性：2/2，DAG planning 独立为可测试函数，dependency status 输出可直接用于 reviewer 验收。
+  - 交接准备度：2/2，`HT-006` 已进入 pending_review，下一轮可直接执行 reviewer gate。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  22 passed (22)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 11ms`。
+  - PASS 本轮变更已 git commit：提交已创建；最终 `git log --oneline -1` 输出见本轮最终回复，避免把会随 amend 改变的提交哈希写进提交正文。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-006.status` 为 `pending_review`，未标记 passing。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；真实 provider 并发长时运行未执行，已记录验收边界。
+  - PASS 下一轮会话无需人工修复即可继续：下一步对 `HT-006` 执行 reviewer acceptance gate。
+- 下一步最佳动作：
+  - 启动 `HT-006` reviewer：静态审查 `agent.ts` DAG planning 和 `tests/setup.test.ts` 覆盖，复跑 `pnpm exec tsc --noEmit`、`pnpm test`、`pnpm build`、`pnpm agent -- --runner dispatcher --dry-run`。
 
 ### Session 2026-05-14 HT-005 reviewer acceptance
 

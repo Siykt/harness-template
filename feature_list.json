@@ -296,7 +296,7 @@
     {
       "id": "HT-006",
       "title": "使用 DAG 支持并行执行",
-      "status": "not_started",
+      "status": "pending_review",
       "priority": 6,
       "dependsOn": [
         "HT-005"
@@ -309,9 +309,24 @@
           "date": "2026-05-14",
           "command": "feature spec registration",
           "result": "PENDING: requirement documented; dispatcher must select all ready not_started features whose dependsOn entries are passing."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript completed with exit 0 after DAG dispatcher planning and max concurrency option changes."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm test",
+          "result": "PASS: vitest run 1 file / 22 tests passed; new tests cover ready pool selection, dependency waiting, missing dependency, blocked dependency, cycle detection, max concurrency limit, and reviewer/coder pool separation."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm agent -- --runner dispatcher --dry-run",
+          "result": "PASS: dispatcher reported runner=coder readyPool=HT-006 maxConcurrency=2, dependency status HT-006 dependsOn=[HT-005:passing], and generated a coder plan without creating a dry-run worktree."
         }
       ],
-      "notes": "DAG 并发依赖 worktree runner 和 agent.ts 集中状态更新，避免并发 agent 共享 checkout 或直接竞争 feature_list 写入。"
+      "notes": "Implemented DAG dispatcher planning for pending review: dependsOn defaults to [], missing/blocked/cyclic dependencies become explicit blockers, ready not_started features form a max-concurrency coder pool, pending_review features form a reviewer pool, and dispatcher dry-run prints ready pool plus dependency status."
     }
   ]
 }

@@ -30,6 +30,19 @@ interface DispatchDecision {
   task: string;
 }
 
+interface DependencyBlocker {
+  feature: FeatureSummary;
+  reason: string;
+}
+
+interface DispatchPool {
+  runner?: ProviderRunnerMode;
+  decisions: DispatchDecision[];
+  blockers: DependencyBlocker[];
+  waiting: Array<{ feature: FeatureSummary; reason: string }>;
+  maxConcurrency: number;
+}
+
 interface CommandResult {
   command: string;
   exitCode: number | null;
@@ -118,6 +131,7 @@ const DEFAULT_CODER_TEMPERATURE = '0.3';
 const DEFAULT_REVIEWER_MODEL = 'gpt-5.5';
 const DEFAULT_REVIEWER_EFFORT = 'high';
 const DEFAULT_REVIEWER_TEMPERATURE = '0';
+const DEFAULT_MAX_CONCURRENCY = '2';
 const CONTEXT_SUMMARY_SCHEMA_VERSION = 1;
 const PREFLIGHT_SCHEMA_VERSION = 1;
 const RUNNER_RESULT_SCHEMA_VERSION = 1;
@@ -155,6 +169,7 @@ interface CliOptions {
   loop: boolean;
   loopDelayMs: string;
   maxLoopIterations: string;
+  maxConcurrency: string;
   skipInit: boolean;
   continueSession: boolean;
   resume?: string;
@@ -308,6 +323,11 @@ const cliArgs = {
     default: DEFAULT_MAX_LOOP_ITERATIONS,
     description: 'Maximum dispatcher loop iterations. 0 means unlimited.'
   },
+  'max-concurrency': {
+    type: 'string',
+    default: DEFAULT_MAX_CONCURRENCY,
+    description: 'For dispatcher mode, maximum number of ready features to run in one pool.'
+  },
   skipInit: {
     type: 'boolean',
     description: 'Skip local ./init.sh preflight.'
@@ -370,6 +390,7 @@ const knownCliFlags = new Set([
   '--loop',
   '--loop-delay-ms',
   '--max-loop-iterations',
+  '--max-concurrency',
   '--skip-init',
   '--skipInit',
   '--continue',
@@ -471,8 +492,9 @@ function toCliOptions(args: ParsedArgs<typeof cliArgs>, rawCliArgs: string[], ex
     layer2Refs: collectRepeatedValues(rawCliArgs, '--layer2-ref'),
     dryRun: Boolean(args.dryRun),
     loop: Boolean(args.loop),
-    loopDelayMs: String(args.loopDelayMs),
-    maxLoopIterations: String(args.maxLoopIterations),
+    loopDelayMs: String(args.loopDelayMs ?? DEFAULT_LOOP_DELAY_MS),
+    maxLoopIterations: String(args.maxLoopIterations ?? DEFAULT_MAX_LOOP_ITERATIONS),
+    maxConcurrency: String(args.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY),
     skipInit: Boolean(args.skipInit),
     continueSession: Boolean(args.continue),
     resume: optionalString(args.resume),
@@ -957,15 +979,6 @@ function featureById(features: FeatureSummary[], id: string): FeatureSummary | u
   return features.find(feature => feature.id === id);
 }
 
-function findBlockedFeature(features: FeatureSummary[], requested?: string): FeatureSummary | undefined {
-  if (requested) {
-    const feature = featureById(features, requested);
-    return feature?.status === 'blocked' ? feature : undefined;
-  }
-
-  return features.filter(feature => feature.status === 'blocked').sort(byPriorityThenId)[0];
-}
-
 function selectFeature(features: FeatureSummary[], requested?: string): FeatureSummary | undefined {
   if (requested) {
     const found = features.find(feature => feature.id === requested);
@@ -982,6 +995,201 @@ function selectFeature(features: FeatureSummary[], requested?: string): FeatureS
 
 function byPriorityThenId(a: FeatureSummary, b: FeatureSummary): number {
   return a.priority - b.priority || a.id.localeCompare(b.id);
+}
+
+function detectDependencyCycleIds(features: FeatureSummary[]): Set<string> {
+  const byId = new Map(features.map(feature => [feature.id, feature]));
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const cycleIds = new Set<string>();
+  const stack: string[] = [];
+
+  const visit = (feature: FeatureSummary) => {
+    if (visited.has(feature.id)) return;
+    if (visiting.has(feature.id)) {
+      const cycleStart = stack.indexOf(feature.id);
+      for (const id of stack.slice(cycleStart >= 0 ? cycleStart : 0)) cycleIds.add(id);
+      cycleIds.add(feature.id);
+      return;
+    }
+
+    visiting.add(feature.id);
+    stack.push(feature.id);
+    for (const dependencyId of feature.dependsOn) {
+      const dependency = byId.get(dependencyId);
+      if (dependency) visit(dependency);
+    }
+    stack.pop();
+    visiting.delete(feature.id);
+    visited.add(feature.id);
+  };
+
+  for (const feature of features) visit(feature);
+  return cycleIds;
+}
+
+function dependencyBlockerReason(
+  feature: FeatureSummary,
+  byId: Map<string, FeatureSummary>,
+  cycleIds: Set<string>,
+  memo = new Map<string, string | undefined>()
+): string | undefined {
+  if (memo.has(feature.id)) return memo.get(feature.id);
+  if (cycleIds.has(feature.id)) {
+    const reason = `dependency cycle includes ${feature.id}`;
+    memo.set(feature.id, reason);
+    return reason;
+  }
+
+  for (const dependencyId of feature.dependsOn) {
+    const dependency = byId.get(dependencyId);
+    if (!dependency) {
+      const reason = `missing dependency ${dependencyId}`;
+      memo.set(feature.id, reason);
+      return reason;
+    }
+    if (dependency.status === 'blocked') {
+      const reason = `dependency ${dependency.id} is blocked`;
+      memo.set(feature.id, reason);
+      return reason;
+    }
+
+    const dependencyReason = dependencyBlockerReason(dependency, byId, cycleIds, memo);
+    if (dependencyReason) {
+      const reason = `dependency ${dependency.id} has blocker: ${dependencyReason}`;
+      memo.set(feature.id, reason);
+      return reason;
+    }
+  }
+
+  memo.set(feature.id, undefined);
+  return undefined;
+}
+
+function dependenciesPassing(feature: FeatureSummary, byId: Map<string, FeatureSummary>): boolean {
+  return feature.dependsOn.every(dependencyId => byId.get(dependencyId)?.status === 'passing');
+}
+
+function formatDependencyStatus(feature: FeatureSummary, features: FeatureSummary[]): string {
+  if (feature.dependsOn.length === 0) return `${feature.id} dependsOn=[none]`;
+  const byId = new Map(features.map(candidate => [candidate.id, candidate]));
+  return `${feature.id} dependsOn=[${feature.dependsOn
+    .map(dependencyId => `${dependencyId}:${byId.get(dependencyId)?.status ?? 'missing'}`)
+    .join(', ')}]`;
+}
+
+function buildDispatchPool(features: FeatureSummary[], opts: CliOptions): DispatchPool {
+  const maxConcurrency = Math.max(1, parseNonNegativeInteger(opts.maxConcurrency, '--max-concurrency'));
+  const byId = new Map(features.map(feature => [feature.id, feature]));
+  const cycleIds = detectDependencyCycleIds(features);
+  const blockerMemo = new Map<string, string | undefined>();
+  const dependencyReason = (feature: FeatureSummary) => dependencyBlockerReason(feature, byId, cycleIds, blockerMemo);
+  const blockers = features
+    .map(feature => {
+      const reason = dependencyReason(feature);
+      return reason ? { feature, reason } : undefined;
+    })
+    .filter((blocker): blocker is DependencyBlocker => Boolean(blocker))
+    .sort((a, b) => byPriorityThenId(a.feature, b.feature));
+
+  if (opts.feature) {
+    const feature = featureById(features, opts.feature);
+    if (!feature) throw new Error(`Requested feature not found: ${opts.feature}`);
+
+    const directBlocker = blockers.find(blocker => blocker.feature.id === feature.id);
+    if (feature.status === 'blocked') {
+      return {
+        decisions: [],
+        blockers: [{ feature, reason: `requested feature ${feature.id} is blocked` }],
+        waiting: [],
+        maxConcurrency
+      };
+    }
+    if (feature.status === 'passing') {
+      return {
+        decisions: [],
+        blockers: [],
+        waiting: [{ feature, reason: `requested feature ${feature.id} is already passing` }],
+        maxConcurrency
+      };
+    }
+    if (directBlocker) {
+      return {
+        decisions: [],
+        blockers: [directBlocker],
+        waiting: [],
+        maxConcurrency
+      };
+    }
+    if (feature.status === 'not_started' && !dependenciesPassing(feature, byId)) {
+      return {
+        decisions: [],
+        blockers: [],
+        waiting: [{ feature, reason: `requested feature ${feature.id} is waiting for dependencies to pass` }],
+        maxConcurrency
+      };
+    }
+
+    const runner = feature.status === 'pending_review' ? 'reviewer' : 'coder';
+    return {
+      runner,
+      decisions: [
+        {
+          feature,
+          runner,
+          reason: `explicit feature ${feature.id} status=${feature.status}`,
+          task: dispatchTaskFor(feature, runner, opts.task)
+        }
+      ],
+      blockers,
+      waiting: [],
+      maxConcurrency
+    };
+  }
+
+  const pendingReview = features.filter(feature => feature.status === 'pending_review').sort(byPriorityThenId);
+  if (pendingReview.length > 0) {
+    return {
+      runner: 'reviewer',
+      decisions: pendingReview.slice(0, maxConcurrency).map(feature => ({
+        feature,
+        runner: 'reviewer',
+        reason: `ready pending_review feature ${feature.id}`,
+        task: dispatchTaskFor(feature, 'reviewer', opts.task)
+      })),
+      blockers,
+      waiting: [],
+      maxConcurrency
+    };
+  }
+
+  const notStarted = features.filter(feature => feature.status === 'not_started').sort(byPriorityThenId);
+  const ready = notStarted.filter(feature => !dependencyReason(feature) && dependenciesPassing(feature, byId));
+  const readyIds = new Set(ready.map(feature => feature.id));
+  const waiting = notStarted
+    .filter(feature => !readyIds.has(feature.id) && !dependencyReason(feature))
+    .map(feature => ({
+      feature,
+      reason:
+        feature.dependsOn.length === 0
+          ? `feature ${feature.id} is not dispatchable`
+          : `waiting for dependencies: ${feature.dependsOn
+              .filter(dependencyId => byId.get(dependencyId)?.status !== 'passing')
+              .join(', ')}`
+    }));
+
+  return {
+    runner: ready.length > 0 ? 'coder' : undefined,
+    decisions: ready.slice(0, maxConcurrency).map(feature => ({
+      feature,
+      runner: 'coder',
+      reason: `ready not_started feature ${feature.id}; dependencies passing=[${feature.dependsOn.join(', ') || 'none'}]`,
+      task: dispatchTaskFor(feature, 'coder', opts.task)
+    })),
+    blockers,
+    waiting,
+    maxConcurrency
+  };
 }
 
 function dispatchTaskFor(feature: FeatureSummary, runner: ProviderRunnerMode, requestedTask?: string): string {
@@ -1003,68 +1211,6 @@ function dispatchTaskFor(feature: FeatureSummary, runner: ProviderRunnerMode, re
   if (requestedTask) return `${requestedTask}\n\nDispatcher status contract:\n- ${statusContract.join('\n- ')}`;
 
   return statusContract.join('\n');
-}
-
-function decideDispatch(features: FeatureSummary[], opts: CliOptions): DispatchDecision | undefined {
-  if (opts.feature) {
-    const feature = featureById(features, opts.feature);
-    if (!feature) throw new Error(`Requested feature not found: ${opts.feature}`);
-
-    if (feature.status === 'blocked') {
-      console.error(`[agent.ts] dispatcher stopped: requested feature is blocked: ${feature.id}`);
-      console.error('[agent.ts] Resolve the blocked report before dispatching new work.');
-      return undefined;
-    }
-    if (feature.status === 'passing') {
-      console.error(`[agent.ts] dispatcher stopped: requested feature is already passing: ${feature.id}`);
-      return undefined;
-    }
-
-    const runner = feature.status === 'pending_review' ? 'reviewer' : 'coder';
-    return {
-      feature,
-      runner,
-      reason: `explicit feature ${feature.id} status=${feature.status}`,
-      task: dispatchTaskFor(feature, runner, opts.task)
-    };
-  }
-
-  const blocked = findBlockedFeature(features);
-  if (blocked) {
-    console.error(`[agent.ts] dispatcher stopped: blocked feature present: ${blocked.id}`);
-    console.error('[agent.ts] Resolve the blocked report before dispatching new work.');
-    return undefined;
-  }
-
-  const pendingReview = features.filter(feature => feature.status === 'pending_review').sort(byPriorityThenId)[0];
-  if (pendingReview) {
-    return {
-      feature: pendingReview,
-      runner: 'reviewer',
-      reason: `auto-discovered pending_review feature ${pendingReview.id}`,
-      task: dispatchTaskFor(pendingReview, 'reviewer', opts.task)
-    };
-  }
-
-  const notStarted = features.filter(feature => feature.status === 'not_started').sort(byPriorityThenId)[0];
-  if (notStarted) {
-    return {
-      feature: notStarted,
-      runner: 'coder',
-      reason: `auto-discovered not_started feature ${notStarted.id}`,
-      task: dispatchTaskFor(notStarted, 'coder', opts.task)
-    };
-  }
-
-  const inProgress = features.filter(feature => feature.status === 'in_progress').sort(byPriorityThenId)[0];
-  if (inProgress) {
-    console.error(`[agent.ts] dispatcher stopped: only in_progress work remains (${inProgress.id}).`);
-    console.error('[agent.ts] Pass --feature explicitly if you want dispatcher to continue that feature with the coder.');
-    return undefined;
-  }
-
-  console.error('[agent.ts] dispatcher stopped: no not_started or pending_review features found.');
-  return undefined;
 }
 
 function resolveLayer2Docs(cwd: string, feature: FeatureSummary | undefined, extraRefs: string[]): string[] {
@@ -1479,41 +1625,82 @@ async function runHarness(
 
 async function runDispatcherOnce(opts: CliOptions, cwd: string, iteration?: number): Promise<DispatcherRunResult> {
   const features = readFeatureSummaries();
-  const blocked = findBlockedFeature(features, opts.feature);
-  if (blocked) {
-    console.error(`[agent.ts] dispatcher stopped: blocked feature present: ${blocked.id}`);
-    console.error('[agent.ts] Resolve the blocked report before dispatching new work.');
-    return {
-      exitCode: 1,
-      stopReason: 'blocked'
-    };
-  }
-
-  const decision = decideDispatch(features, opts);
-  if (!decision) {
-    return {
-      exitCode: 1,
-      stopReason: 'no_work'
-    };
-  }
-
+  const pool = buildDispatchPool(features, opts);
   const prefix = iteration === undefined ? 'dispatcher decision' : `dispatcher loop iteration=${iteration}`;
-  console.log(`[agent.ts] ${prefix}: ${decision.reason} -> ${decision.runner}`);
-  const dispatchOpts = {
-    ...opts,
-    feature: decision.feature.id
-  };
-  const exitCode = await runHarness(
-    dispatchOpts,
-    cwd,
-    runnerDefaults(dispatchOpts, decision.runner),
-    decision.feature,
-    decision.task
+  if (pool.blockers.length > 0) {
+    console.error(
+      `[agent.ts] dispatcher dependency blockers: ${pool.blockers
+        .map(blocker => `${blocker.feature.id}: ${blocker.reason}`)
+        .join('; ')}`
+    );
+  }
+  if (pool.waiting.length > 0) {
+    console.log(
+      `[agent.ts] dispatcher waiting: ${pool.waiting
+        .map(waiting => `${waiting.feature.id}: ${waiting.reason}`)
+        .join('; ')}`
+    );
+  }
+  if (pool.decisions.length === 0) {
+    const inProgress = features.filter(feature => feature.status === 'in_progress').sort(byPriorityThenId)[0];
+    if (inProgress) {
+      console.error(`[agent.ts] dispatcher stopped: only in_progress work remains (${inProgress.id}).`);
+      console.error('[agent.ts] Pass --feature explicitly if you want dispatcher to continue that feature with the coder.');
+    } else {
+      console.error('[agent.ts] dispatcher stopped: no ready not_started or pending_review features found.');
+    }
+    return {
+      exitCode: pool.blockers.length > 0 ? 1 : 0,
+      stopReason: pool.blockers.length > 0 ? 'blocked' : 'no_work'
+    };
+  }
+
+  console.log(
+    `[agent.ts] ${prefix}: runner=${pool.runner} readyPool=${pool.decisions
+      .map(decision => decision.feature.id)
+      .join(', ')} maxConcurrency=${pool.maxConcurrency}`
   );
+  console.log(
+    `[agent.ts] dispatcher dependency status: ${features
+      .filter(feature => feature.status === 'not_started' || feature.status === 'pending_review')
+      .sort(byPriorityThenId)
+      .map(feature => formatDependencyStatus(feature, features))
+      .join('; ')}`
+  );
+  for (const decision of pool.decisions) {
+    console.log(`[agent.ts] dispatch planned: ${decision.reason} -> ${decision.runner}`);
+  }
+
+  const runDecision = async (decision: DispatchDecision) => {
+    const dispatchOpts = {
+      ...opts,
+      feature: decision.feature.id
+    };
+    const exitCode = await runHarness(
+      dispatchOpts,
+      cwd,
+      runnerDefaults(dispatchOpts, decision.runner),
+      decision.feature,
+      decision.task
+    );
+    return { decision, exitCode };
+  };
+
+  const results = opts.dryRun
+    ? /* Keep plan numbering deterministic in dry-run output. */ []
+    : await Promise.all(pool.decisions.map(runDecision));
+  if (opts.dryRun) {
+    for (const decision of pool.decisions) {
+      const result = await runDecision(decision);
+      results.push(result);
+    }
+  }
+
+  const failed = results.find(result => result.exitCode !== 0);
   return {
-    decision,
-    exitCode,
-    previousStatus: decision.feature.status
+    decision: pool.decisions[0],
+    exitCode: failed?.exitCode ?? 0,
+    previousStatus: pool.decisions[0]?.feature.status
   };
 }
 
@@ -1653,6 +1840,7 @@ if (process.env.NODE_ENV !== 'test') {
 export {
   buildPrompt,
   buildProviderInstruction,
+  buildDispatchPool,
   extractCurrentStatusAndLatestSession,
   planRunnerWorktree,
   readCachedContextSummary,
