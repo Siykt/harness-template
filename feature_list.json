@@ -190,7 +190,7 @@
     {
       "id": "HT-004",
       "title": "修复 Agent 重复读取上下文和重复 Init",
-      "status": "pending_review",
+      "status": "passing",
       "priority": 4,
       "dependsOn": [],
       "layer2_refs": [
@@ -256,9 +256,14 @@
           "date": "2026-05-14",
           "command": "./init.sh",
           "result": "PASS: vitest run 1 file / 16 tests passed; init.sh completed without errors."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "reviewer acceptance: static inspection + pnpm test + pnpm exec tsc --noEmit + pnpm build + pnpm agent -- --runner coder --feature HT-004 --task \"smoke\" --dry-run + generated plan/preflight inspection",
+          "result": "PASS: reviewer accepted HT-004. Implementation provides run-scoped preflight evidence, stable prompt contract that prevents unconditional startup replay, hash-keyed context summary cache, latest-session regression coverage, failed-init evidence visibility, and a dry-run plan/preflight manifest with init exitCode 0."
         }
       ],
-      "notes": "Blocked reviewer findings fixed: latest-session extraction now ignores Session template and selects the newest dated real session with file-order tie break; failed-init evidence visibility is covered by tests. HT-004 is ready for reviewer re-check."
+      "notes": "Reviewer accepted HT-004. agent.ts owns runner preflight evidence, generated plans instruct downstream runners to reuse it unless invalid, context summaries are cached by source path + sha256 + schema version, and regressions cover latest-session selection plus failed-init evidence visibility."
     },
     {
       "id": "HT-005",

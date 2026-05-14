@@ -5,12 +5,65 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-004` pending_review，等待 reviewer 验收
+- 当前最高优先级未完成功能：`HT-005` not_started，等待实现
 - 当前唯一 active feature：`无`
 - 当前 blocker：`无`
-- 最近完成：`HT-004` coder 实现完成，已进入 pending_review；`HT-003` reviewer 验收通过，GitHub Actions e2e 验证进入 passing
+- 最近完成：`HT-004` reviewer 验收通过，runner preflight/context cache 进入 passing；`HT-003` reviewer 验收通过，GitHub Actions e2e 验证进入 passing
 
 ## 会话记录
+
+### Session 2026-05-14 HT-004 reviewer acceptance
+
+- 日期：2026-05-14
+- 本轮目标：按 `docs/plans/plan-2026-05-14-reviewer-002.md` 对 `HT-004` 做 strict reviewer acceptance gate；若可接受，将状态从 `pending_review` 更新为 `passing` 并记录 evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`64ec792`、`5de2340`、`0437f28`、`ca578d5`、`b4627ae`
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  16 passed (16)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：选定唯一 active review feature `HT-004`，当前状态 `pending_review`。
+  - Layer 2：读取 `docs/features/HT-004-run-context-preflight-cache.md`；同时读取用户指定的 `docs/plans/plan-2026-05-14-reviewer-002.md` 作为完整执行 prompt/context。
+- 已完成：
+  - 审查 `agent.ts`：确认 runner prompt 包含 Stable Harness Contract、run-scoped preflight evidence path、禁止无条件重跑完整 startup protocol 的条件，以及 hash-keyed context summary cache。
+  - 审查 `tests/setup.test.ts`：确认覆盖 feature_list 摘要去噪、context cache、preflight reuse prompt、latest real session 选择和 failed-init evidence 可见性。
+  - 审查 `docs/features/HT-004-run-context-preflight-cache.md`：确认 HT-004 todo table 已全部为 `done`，验收命令与实现证据一致。
+  - 更新 `feature_list.json`：将 `HT-004.status` 从 `pending_review` 改为 `passing`，追加 reviewer acceptance evidence。
+  - 更新 `claude-progress.md`：记录本轮 reviewer 验收、验证、rubric 和 clean-state checklist。
+- 运行过的验证：
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  16 passed (16)`。
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  16 passed (16)`。
+  - `pnpm exec tsc --noEmit`：PASS；exit 0，无错误输出。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 5ms`。
+  - `pnpm agent -- --runner coder --feature HT-004 --task "smoke" --dry-run`：PASS；输出生成 `docs/plans/plan-2026-05-14-coder-007.md` 和 `.harness/runs/2026-05-14T131226-588Z-HT-004-coder/preflight.json`。
+  - `rg "Stable Harness Contract|preflight evidence file|Do not repeat the full startup protocol|Preflight Evidence Summary|### ./init.sh" docs/plans/plan-2026-05-14-coder-007.md`：PASS；plan 含 stable contract、canonical preflight evidence、禁止无条件重跑完整 startup protocol 和 init evidence block。
+  - `node preflight inspection`：PASS；preflight JSON 中 `featureId` 为 `HT-004`、`runner` 为 `coder`、`init.exitCode` 为 0、init stdout 含 `Tests 16 passed`、Layer 2 指向 `docs/features/HT-004-run-context-preflight-cache.md`。
+  - `ls .harness/cache/context`：PASS；存在 `agents-*`、`contextGate-*`、`featureList-*`、`featureDoc-docs_features_HT-004-run-context-preflight-cache-*` hash-keyed cache artifacts。
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` PASS；agent coder dry-run PASS，且生成的 plan/preflight 证明 HT-004 runner 路径仍可用。
+- 更新过的文件或工件：
+  - `feature_list.json`：`HT-004` reviewer 验收通过，状态更新为 `passing`，追加 review evidence。
+  - `claude-progress.md`：记录本轮 reviewer 验收、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - `.harness/` 为运行期本地产物，已由 `.gitignore` 忽略，不提交。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，实现符合 HT-004：agent.ts 生成可复用 preflight evidence、稳定 prompt contract、context summary cache，并保留失败 evidence。
+  - 验证：2/2，已运行 init、test、tsc、build、agent dry-run、generated plan grep、preflight JSON 检查和 cache artifact 检查。
+  - 范围纪律：2/2，本轮仅做 reviewer 检查并更新 tracker/progress 文件，未修改生产代码。
+  - 可靠性：2/2，preflight evidence 绑定 run id；context cache 使用 source path、sha256 和 schema version 自动失效。
+  - 可维护性：2/2，prompt contract、manifest 结构和测试覆盖清晰，可由下一轮直接复用。
+  - 交接准备度：2/2，`HT-004` 已进入 passing，下一轮可启动 `HT-005`。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  16 passed (16)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 5ms`。
+  - PASS 本轮变更已 git commit：提交信息为 `chore: accept HT-004 reviewer gate`；最终 `git log --oneline -1` 输出由本轮最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-004.status` 已更新为 `passing`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；`.harness/` 本地产物不提交已记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步启动 `HT-005` worktree runner/status owner。
+- 下一步最佳动作：
+  - 启动 `HT-005`：使用 Git Worktree 执行 Agent Runner 并集中状态更新。
 
 ### Session 2026-05-14 HT-004 blocker fix
 
