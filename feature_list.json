@@ -190,7 +190,7 @@
     {
       "id": "HT-004",
       "title": "修复 Agent 重复读取上下文和重复 Init",
-      "status": "not_started",
+      "status": "pending_review",
       "priority": 4,
       "dependsOn": [],
       "layer2_refs": [
@@ -201,9 +201,34 @@
           "date": "2026-05-14",
           "command": "feature spec registration",
           "result": "PENDING: requirement documented for design discussion before implementation; no production code changed."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript type check completed with exit 0 after adding context summaries and preflight manifest."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm test",
+          "result": "PASS: vitest run 1 file / 14 tests passed; new tests cover feature_list summary trimming, hash-keyed context cache, and preflight reuse prompt contract."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 6ms."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm agent -- --runner coder --feature HT-004 --task \"smoke\" --dry-run",
+          "result": "PASS: dry-run generated .harness/runs/.../preflight.json with init exitCode 0 and a plan containing Stable Harness Contract, preflight evidence path, and cache-friendly prompt guidance."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "./init.sh",
+          "result": "PASS: vitest run 1 file / 14 tests passed; init.sh completed without errors."
         }
       ],
-      "notes": "需要先讨论 preflight ownership 设计，避免 agent.ts 和子 agent 在同一次 runner 调用中重复读取 CONTEXT-GATE.md 或重复执行 ./init.sh。"
+      "notes": "已实现 dispatcher 层 context cache、run-scoped preflight evidence manifest 和 cache-friendly runner prompt。子 agent 被要求复用 harness preflight，只有证据缺失、失败、被修改失效或用户明确要求时才重跑完整启动流程。"
     },
     {
       "id": "HT-005",

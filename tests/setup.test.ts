@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { agentProviderIds, buildProviderCommand } from '../agent-providers';
-import { splitForwardedArgs, toCliOptions } from '../agent';
+import { buildPrompt, readCachedContextSummary, splitForwardedArgs, summarizeContext, toCliOptions } from '../agent';
 import {
   buildFeatureAgentDryRunPrompt,
   buildFeatureSpecMarkdown,
@@ -134,6 +134,167 @@ describe('agent CLI options', () => {
     );
 
     expect(opts.agentBin).toBe('/bin/codex');
+  });
+});
+
+describe('runner context cache and preflight prompt', () => {
+  it('summarizes feature_list.json without carrying evidence or notes payloads', () => {
+    const summary = summarizeContext(
+      'featureList',
+      JSON.stringify({
+        features: [
+          {
+            id: 'HT-004',
+            title: 'Trim context',
+            status: 'in_progress',
+            priority: 4,
+            dependsOn: ['HT-001'],
+            layer2_refs: ['docs/features/HT-004.md'],
+            evidence: [{ command: 'very noisy command', result: 'very noisy result' }],
+            notes: 'long private note'
+          }
+        ]
+      })
+    );
+
+    expect(summary).toContain('"id": "HT-004"');
+    expect(summary).toContain('"dependsOn"');
+    expect(summary).not.toContain('very noisy command');
+    expect(summary).not.toContain('long private note');
+  });
+
+  it('writes file-hash keyed context summaries into dispatcher cache', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'context-cache-'));
+    try {
+      writeFileSync(join(cwd, 'AGENTS.md'), '# AGENTS.md\n\n## 规则\n\n- Keep one active feature.\n', 'utf8');
+      const summary = readCachedContextSummary(cwd, 'AGENTS.md', 'agents');
+      const expectedCachePath = join(
+        cwd,
+        '.harness/cache/context',
+        `agents-AGENTS.md-${summary.sourceSha256.slice(0, 16)}-v${summary.schemaVersion}.json`
+      );
+
+      expect(summary.summary).toContain('Keep one active feature');
+      expect(existsSync(expectedCachePath)).toBe(true);
+      expect(readCachedContextSummary(cwd, 'AGENTS.md', 'agents').sourceSha256).toBe(summary.sourceSha256);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('builds a cache-friendly prompt that reuses preflight evidence instead of asking for a full restart', () => {
+    const prompt = buildPrompt({
+      cwd: '/repo',
+      task: 'Implement HT-004.',
+      runnerConfig: {
+        runner: 'coder',
+        model: 'gpt-5.5',
+        effort: 'high',
+        temperature: '0.3'
+      },
+      generatedAt: '2026-05-14T00:00:00.000Z',
+      runId: 'run-HT-004-coder',
+      preflightEvidencePath: '/repo/.harness/runs/run-HT-004-coder/preflight.json',
+      preflight: {
+        schemaVersion: 1,
+        runId: 'run-HT-004-coder',
+        repoRoot: '/repo',
+        generatedAt: '2026-05-14T00:00:00.000Z',
+        featureId: 'HT-004',
+        runner: 'coder',
+        commands: {
+          pwd: { exitCode: 0, stdout: '/repo' },
+          gitLog: { command: 'git log --oneline -5', exitCode: 0, stdout: 'abc123 commit\n', stderr: '' },
+          init: { command: './init.sh', exitCode: 0, stdout: 'Tests 11 passed', stderr: '' }
+        },
+        context: {
+          agents: {
+            schemaVersion: 1,
+            kind: 'agents',
+            sourcePath: 'AGENTS.md',
+            sourceSha256: 'agents-sha',
+            generatedAt: '2026-05-14T00:00:00.000Z'
+          },
+          contextGate: {
+            schemaVersion: 1,
+            kind: 'contextGate',
+            sourcePath: 'CONTEXT-GATE.md',
+            sourceSha256: 'gate-sha',
+            generatedAt: '2026-05-14T00:00:00.000Z'
+          },
+          featureList: {
+            schemaVersion: 1,
+            kind: 'featureList',
+            sourcePath: 'feature_list.json',
+            sourceSha256: 'features-sha',
+            generatedAt: '2026-05-14T00:00:00.000Z'
+          },
+          layer2: []
+        }
+      },
+      contextSummaries: {
+        agents: {
+          schemaVersion: 1,
+          kind: 'agents',
+          sourcePath: 'AGENTS.md',
+          sourceSha256: 'agents-sha',
+          generatedAt: '2026-05-14T00:00:00.000Z',
+          summary: 'AGENTS summary only'
+        },
+        contextGate: {
+          schemaVersion: 1,
+          kind: 'contextGate',
+          sourcePath: 'CONTEXT-GATE.md',
+          sourceSha256: 'gate-sha',
+          generatedAt: '2026-05-14T00:00:00.000Z',
+          summary: 'CONTEXT summary only'
+        },
+        featureList: {
+          schemaVersion: 1,
+          kind: 'featureList',
+          sourcePath: 'feature_list.json',
+          sourceSha256: 'features-sha',
+          generatedAt: '2026-05-14T00:00:00.000Z',
+          summary: '{"features":[]}'
+        },
+        layer2: [
+          {
+            schemaVersion: 1,
+            kind: 'featureDoc',
+            sourcePath: 'docs/features/HT-004.md',
+            sourceSha256: 'feature-sha',
+            generatedAt: '2026-05-14T00:00:00.000Z',
+            summary: 'Feature doc summary only'
+          }
+        ]
+      },
+      progressSummary: 'current status summary',
+      features: [
+        {
+          id: 'HT-004',
+          title: 'Trim context',
+          status: 'in_progress',
+          priority: 4,
+          dependsOn: [],
+          layer2Refs: ['docs/features/HT-004.md']
+        }
+      ],
+      selectedFeature: {
+        id: 'HT-004',
+        title: 'Trim context',
+        status: 'in_progress',
+        priority: 4,
+        dependsOn: [],
+        layer2Refs: ['docs/features/HT-004.md']
+      }
+    });
+
+    expect(prompt).toContain('## Stable Harness Contract');
+    expect(prompt).toContain('preflight evidence file as the canonical startup evidence');
+    expect(prompt).toContain('.harness/runs/run-HT-004-coder/preflight.json');
+    expect(prompt).toContain('Codex/OpenAI automatic prompt caching');
+    expect(prompt).toContain('AGENTS summary only');
+    expect(prompt).not.toContain('每轮会话开始时，**严格按此顺序执行**');
   });
 });
 

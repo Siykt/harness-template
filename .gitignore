@@ -47,6 +47,7 @@ prisma/generated/
 # Runtime state
 runtime/
 tmp/
+.harness/
 data/*lock*
 data/*.jsonl
 data/*.db

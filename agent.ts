@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -18,6 +19,7 @@ interface FeatureSummary {
   title: string;
   status: string;
   priority: number;
+  dependsOn: string[];
   layer2Refs: string[];
 }
 
@@ -42,6 +44,40 @@ interface DispatcherRunResult {
   stopReason?: 'blocked' | 'no_work';
 }
 
+type ContextSummaryKind = 'agents' | 'contextGate' | 'featureList' | 'featureDoc';
+
+interface ContextSummary {
+  schemaVersion: number;
+  kind: ContextSummaryKind;
+  sourcePath: string;
+  sourceSha256: string;
+  generatedAt: string;
+  summary: string;
+}
+
+interface PreflightEvidence {
+  schemaVersion: number;
+  runId: string;
+  repoRoot: string;
+  generatedAt: string;
+  featureId?: string;
+  runner: ProviderRunnerMode;
+  commands: {
+    pwd: {
+      exitCode: number;
+      stdout: string;
+    };
+    gitLog: Pick<CommandResult, 'command' | 'exitCode' | 'stdout' | 'stderr'>;
+    init?: Pick<CommandResult, 'command' | 'exitCode' | 'stdout' | 'stderr'>;
+  };
+  context: {
+    agents: Omit<ContextSummary, 'summary'>;
+    contextGate: Omit<ContextSummary, 'summary'>;
+    featureList: Omit<ContextSummary, 'summary'>;
+    layer2: Array<Omit<ContextSummary, 'summary'>>;
+  };
+}
+
 const DEFAULT_MAX_TURNS = '40';
 const DEFAULT_PERMISSION_MODE = 'full_auto';
 const DEFAULT_AGENT_PROVIDER: AgentProviderId = 'codex';
@@ -54,6 +90,8 @@ const DEFAULT_CODER_TEMPERATURE = '0.3';
 const DEFAULT_REVIEWER_MODEL = 'gpt-5.5';
 const DEFAULT_REVIEWER_EFFORT = 'high';
 const DEFAULT_REVIEWER_TEMPERATURE = '0';
+const CONTEXT_SUMMARY_SCHEMA_VERSION = 1;
+const PREFLIGHT_SCHEMA_VERSION = 1;
 
 type ProviderRunnerMode = 'coder' | 'reviewer';
 type RunnerMode = ProviderRunnerMode | 'dispatcher' | 'feature';
@@ -435,6 +473,23 @@ function readText(path: string): string {
   return readFileSync(path, 'utf8');
 }
 
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function ensureDir(path: string): void {
+  mkdirSync(path, { recursive: true });
+}
+
+function cacheSafePath(path: string): string {
+  return path.replace(/[^a-zA-Z0-9._-]+/g, '_');
+}
+
+function contextSummaryMetadata(summary: ContextSummary): Omit<ContextSummary, 'summary'> {
+  const { summary: _summary, ...metadata } = summary;
+  return metadata;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -478,6 +533,136 @@ function truncate(text: string, maxChars: number): string {
   return `${text.slice(0, maxChars)}\n...[truncated ${text.length - maxChars} chars]`;
 }
 
+function compactLines(text: string, maxLines: number): string {
+  return text
+    .split(/\r?\n/)
+    .map(line => line.trimEnd())
+    .filter(line => line.trim().length > 0)
+    .slice(0, maxLines)
+    .join('\n');
+}
+
+function extractSection(text: string, heading: string, maxChars: number): string {
+  const start = text.indexOf(heading);
+  if (start < 0) return '';
+  const next = text.indexOf('\n## ', start + heading.length);
+  return truncate(text.slice(start, next >= 0 ? next : text.length).trim(), maxChars);
+}
+
+function summarizeAgents(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const selected = lines.filter(line => {
+    const trimmed = line.trim();
+    return (
+      trimmed.startsWith('#') ||
+      /^\d+\.\s/.test(trimmed) ||
+      trimmed.startsWith('- ') ||
+      trimmed.includes('完成门槛') ||
+      trimmed.includes('结束前')
+    );
+  });
+
+  return compactLines(
+    [
+      'AGENTS.md summary for runner prompts. The full file is available at AGENTS.md if exact wording is needed.',
+      ...selected
+    ].join('\n'),
+    90
+  );
+}
+
+function summarizeContextGate(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const selected = lines.filter(line => {
+    const trimmed = line.trim();
+    return (
+      trimmed.startsWith('#') ||
+      trimmed.startsWith('| H') ||
+      trimmed.startsWith('| R') ||
+      trimmed.startsWith('| -') ||
+      trimmed.includes('Layer 0') ||
+      trimmed.includes('Layer 1') ||
+      trimmed.includes('Layer 2') ||
+      trimmed.includes('Layer 3')
+    );
+  });
+
+  return compactLines(
+    [
+      'CONTEXT-GATE.md summary for runner prompts. The full file is available at CONTEXT-GATE.md if exact wording is needed.',
+      ...selected
+    ].join('\n'),
+    90
+  );
+}
+
+function summarizeFeatureList(text: string): string {
+  const features = parseFeatureSummaries(text).map(feature => ({
+    id: feature.id,
+    title: feature.title,
+    status: feature.status,
+    priority: feature.priority,
+    dependsOn: feature.dependsOn,
+    layer2_refs: feature.layer2Refs
+  }));
+  return JSON.stringify({ features }, null, 2);
+}
+
+function summarizeFeatureDoc(text: string): string {
+  const title = text.split(/\r?\n/, 1)[0] ?? '';
+  const requirement = extractSection(text, '## Requirement', 2200);
+  const todos = extractSection(text, '## Table Todo List', 2600);
+  const verification = extractSection(text, '## Verification', 1200);
+  return [title, requirement, todos, verification].filter(Boolean).join('\n\n');
+}
+
+function summarizeContext(kind: ContextSummaryKind, text: string): string {
+  if (kind === 'agents') return summarizeAgents(text);
+  if (kind === 'contextGate') return summarizeContextGate(text);
+  if (kind === 'featureList') return summarizeFeatureList(text);
+  return summarizeFeatureDoc(text);
+}
+
+function readCachedContextSummary(cwd: string, sourcePath: string, kind: ContextSummaryKind): ContextSummary {
+  const raw = readText(resolve(cwd, sourcePath));
+  const sourceSha256 = sha256(raw);
+  const cacheDir = resolve(cwd, '.harness/cache/context');
+  ensureDir(cacheDir);
+
+  const cachePath = join(
+    cacheDir,
+    `${kind}-${cacheSafePath(sourcePath)}-${sourceSha256.slice(0, 16)}-v${CONTEXT_SUMMARY_SCHEMA_VERSION}.json`
+  );
+
+  if (existsSync(cachePath)) {
+    const cached = JSON.parse(readText(cachePath)) as ContextSummary;
+    if (
+      cached.schemaVersion === CONTEXT_SUMMARY_SCHEMA_VERSION &&
+      cached.kind === kind &&
+      cached.sourcePath === sourcePath &&
+      cached.sourceSha256 === sourceSha256
+    ) {
+      return cached;
+    }
+  }
+
+  const summary: ContextSummary = {
+    schemaVersion: CONTEXT_SUMMARY_SCHEMA_VERSION,
+    kind,
+    sourcePath,
+    sourceSha256,
+    generatedAt: new Date().toISOString(),
+    summary: summarizeContext(kind, raw)
+  };
+  writeFileSync(cachePath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+  return summary;
+}
+
+function createRunId(feature: FeatureSummary | undefined, runner: ProviderRunnerMode, date = new Date()): string {
+  const timestamp = date.toISOString().replaceAll(':', '').replaceAll('.', '-');
+  return `${timestamp}-${feature?.id ?? 'no-feature'}-${runner}`;
+}
+
 function extractCurrentStatusAndLatestSession(progress: string): string {
   const statusStart = progress.indexOf('## 当前已验证状态');
   const statusEnd = progress.indexOf('## 会话记录', statusStart);
@@ -496,6 +681,7 @@ function parseFeatureSummaries(raw: string): FeatureSummary[] {
     title: String(feature.title ?? ''),
     status: String(feature.status ?? ''),
     priority: Number(feature.priority ?? 999),
+    dependsOn: Array.isArray(feature.dependsOn) ? feature.dependsOn.map(ref => String(ref)) : [],
     layer2Refs: Array.isArray(feature.layer2_refs) ? feature.layer2_refs.map(ref => String(ref)) : []
   }));
 }
@@ -633,38 +819,35 @@ function resolveLayer2Docs(cwd: string, feature: FeatureSummary | undefined, ext
   return docs;
 }
 
-function formatFeatureSummaries(features: FeatureSummary[]): string {
-  return features
-    .map(
-      feature =>
-        `- ${feature.id} | ${feature.status} | P${feature.priority} | ${feature.title} | layer2_refs=${feature.layer2Refs.join(', ') || 'missing'}`
-    )
-    .join('\n');
-}
-
 function buildPrompt(params: {
   cwd: string;
   task: string;
   runnerConfig: RunnerConfig;
   generatedAt: string;
-  agents: string;
-  contextGate: string;
-  gitLog: CommandResult;
-  initResult?: CommandResult;
+  runId: string;
+  preflightEvidencePath: string;
+  preflight: PreflightEvidence;
+  contextSummaries: {
+    agents: ContextSummary;
+    contextGate: ContextSummary;
+    featureList: ContextSummary;
+    layer2: ContextSummary[];
+  };
   progressSummary: string;
   features: FeatureSummary[];
   selectedFeature?: FeatureSummary;
-  layer2: Array<{ path: string; text: string }>;
 }) {
-  const initBlock = params.initResult
-    ? `exit=${params.initResult.exitCode}\n${tailLines(`${params.initResult.stdout}\n${params.initResult.stderr}`, 80)}`
+  const initBlock = params.preflight.commands.init
+    ? `exit=${params.preflight.commands.init.exitCode}\n${tailLines(`${params.preflight.commands.init.stdout}\n${params.preflight.commands.init.stderr}`, 40)}`
     : 'Skipped by agent.ts --skip-init.';
 
   const selected = params.selectedFeature
     ? `${params.selectedFeature.id} (${params.selectedFeature.status}) - ${params.selectedFeature.title}`
     : 'none';
 
-  const layer2Block = params.layer2.map(doc => `### ${doc.path}\n${truncate(doc.text, 0)}`).join('\n\n');
+  const layer2Block = params.contextSummaries.layer2
+    .map(doc => `### ${doc.sourcePath}\nsha256=${doc.sourceSha256}\n${doc.summary}`)
+    .join('\n\n');
 
   const runnerContract =
     params.runnerConfig.runner === 'coder'
@@ -689,6 +872,7 @@ function buildPrompt(params: {
   return `# Codex Runner Plan
 
 - Generated at: ${params.generatedAt}
+- Run id: ${params.runId}
 - Runner: ${params.runnerConfig.runner}
 - Model: ${params.runnerConfig.model ?? 'default'}
 - Effort: ${params.runnerConfig.effort ?? 'default'}
@@ -696,7 +880,8 @@ function buildPrompt(params: {
 - Repository: ${params.cwd}
 - Selected feature: ${selected}
 - User task: ${params.task}
-- Routed docs: ${params.layer2.map(doc => doc.path).join(', ') || 'none'}
+- Preflight evidence: ${relative(params.cwd, params.preflightEvidencePath)}
+- Routed docs: ${params.contextSummaries.layer2.map(doc => doc.sourcePath).join(', ') || 'none'}
 
 ---
 
@@ -706,6 +891,15 @@ The user task is:
 ${params.task}
 
 This prompt was generated by agent.ts. It has already split the repository AGENTS.md protocol into bounded context sections. Follow the repository rules exactly and continue from the evidence below rather than restarting from scratch.
+
+## Stable Harness Contract
+
+- agent.ts is the preflight owner for this runner invocation.
+- The downstream runner is the execution owner for the selected task.
+- Treat the preflight evidence file as the canonical startup evidence for run ${params.runId}.
+- Do not repeat the full startup protocol unless evidence is missing or failed, you changed files that invalidate it, the user explicitly asks, or you need a narrower verification command for your implementation.
+- Keep stable, repeated instructions near the top of this plan so Codex/OpenAI automatic prompt caching can reuse the shared prefix when available.
+- Codex CLI currently exposes no harness-specific prompt cache flag here; dispatcher cache is implemented by stable summaries and file-hash keyed context artifacts.
 
 ## Runner Contract
 
@@ -722,23 +916,38 @@ ${runnerContract}
 - Before finishing, read evaluator-rubric.md and clean-state-checklist.md and record the required PASS/FAIL evidence.
 - If pnpm build passes, commit the completed work.
 
-## Layer 0: AGENTS.md
+## Context Index
 
-${truncate(params.agents, 9000)}
+The full source files remain available in the repository, but this plan intentionally carries summaries by default.
+Read full files only when exact wording or implementation details are needed.
 
-## Layer 0: CONTEXT-GATE.md
+### AGENTS.md
 
-${truncate(params.contextGate, 9000)}
+sha256=${params.contextSummaries.agents.sourceSha256}
+${params.contextSummaries.agents.summary}
 
-## Preflight Evidence
+### CONTEXT-GATE.md
+
+sha256=${params.contextSummaries.contextGate.sourceSha256}
+${params.contextSummaries.contextGate.summary}
+
+### feature_list.json summary
+
+sha256=${params.contextSummaries.featureList.sourceSha256}
+${params.contextSummaries.featureList.summary}
+
+## Preflight Evidence Summary
+
+Full machine-readable evidence is available at ${relative(params.cwd, params.preflightEvidencePath)}.
 
 ### pwd
-${params.cwd}
+exit=${params.preflight.commands.pwd.exitCode}
+${params.preflight.commands.pwd.stdout}
 
 ### git log --oneline -5
-exit=${params.gitLog.exitCode}
-${params.gitLog.stdout.trim()}
-${params.gitLog.stderr.trim()}
+exit=${params.preflight.commands.gitLog.exitCode}
+${params.preflight.commands.gitLog.stdout.trim()}
+${params.preflight.commands.gitLog.stderr.trim()}
 
 ### ./init.sh
 ${initBlock}
@@ -748,8 +957,6 @@ ${initBlock}
 ${params.progressSummary}
 
 ## Layer 1: feature_list.json summaries
-
-${formatFeatureSummaries(params.features)}
 
 ## Layer 2: routed docs
 
@@ -813,36 +1020,81 @@ async function spawnAgentProvider(command: string, args: string[], cwd: string):
   });
 }
 
-function loadRunContext(opts: CliOptions, cwd: string, selectedFeatureOverride?: FeatureSummary) {
-  const agents = readText('AGENTS.md');
-  const contextGate = readText('CONTEXT-GATE.md');
+function loadRunContext(
+  opts: CliOptions,
+  cwd: string,
+  runner: ProviderRunnerMode,
+  selectedFeatureOverride?: FeatureSummary
+) {
+  const agentsSummary = readCachedContextSummary(cwd, 'AGENTS.md', 'agents');
+  const contextGateSummary = readCachedContextSummary(cwd, 'CONTEXT-GATE.md', 'contextGate');
   const gitLog = run('git', ['log', '--oneline', '-5'], cwd);
   const initResult = opts.skipInit ? undefined : run('./init.sh', [], cwd, 180_000);
-  if (initResult && initResult.exitCode !== 0) {
-    console.error(
-      '[agent.ts] ./init.sh failed. The generated prompt will include the failure, but Codex will not be launched automatically.'
-    );
-    console.error(tailLines(`${initResult.stdout}\n${initResult.stderr}`, 80));
-    process.exit(1);
-  }
+  const initFailed = Boolean(initResult && initResult.exitCode !== 0);
 
   const progressSummary = extractCurrentStatusAndLatestSession(readText('claude-progress.md'));
+  const featureListSummary = readCachedContextSummary(cwd, 'feature_list.json', 'featureList');
   const features = parseFeatureSummaries(readText('feature_list.json'));
   const selectedFeature = selectedFeatureOverride ?? selectFeature(features, opts.feature);
-  const layer2 = resolveLayer2Docs(cwd, selectedFeature, opts.layer2Refs).map(path => ({
-    path,
-    text: readText(path)
-  }));
+  const layer2 = resolveLayer2Docs(cwd, selectedFeature, opts.layer2Refs).map(path =>
+    readCachedContextSummary(cwd, path, 'featureDoc')
+  );
+  const runId = createRunId(selectedFeature, runner);
+  const runDir = resolve(cwd, '.harness/runs', runId);
+  ensureDir(runDir);
+  const preflightCommands: PreflightEvidence['commands'] = {
+    pwd: {
+      exitCode: 0,
+      stdout: cwd
+    },
+    gitLog: {
+      command: gitLog.command,
+      exitCode: gitLog.exitCode,
+      stdout: gitLog.stdout,
+      stderr: gitLog.stderr
+    }
+  };
+  if (initResult) {
+    preflightCommands.init = {
+      command: initResult.command,
+      exitCode: initResult.exitCode,
+      stdout: tailLines(initResult.stdout, 80),
+      stderr: tailLines(initResult.stderr, 80)
+    };
+  }
+
+  const preflight: PreflightEvidence = {
+    schemaVersion: PREFLIGHT_SCHEMA_VERSION,
+    runId,
+    repoRoot: cwd,
+    generatedAt: new Date().toISOString(),
+    featureId: selectedFeature?.id,
+    runner,
+    commands: preflightCommands,
+    context: {
+      agents: contextSummaryMetadata(agentsSummary),
+      contextGate: contextSummaryMetadata(contextGateSummary),
+      featureList: contextSummaryMetadata(featureListSummary),
+      layer2: layer2.map(contextSummaryMetadata)
+    }
+  };
+  const preflightEvidencePath = join(runDir, 'preflight.json');
+  writeFileSync(preflightEvidencePath, `${JSON.stringify(preflight, null, 2)}\n`, 'utf8');
 
   return {
-    agents,
-    contextGate,
-    gitLog,
-    initResult,
+    runId,
+    preflight,
+    preflightEvidencePath,
+    contextSummaries: {
+      agents: agentsSummary,
+      contextGate: contextGateSummary,
+      featureList: featureListSummary,
+      layer2
+    },
     progressSummary,
     features,
     selectedFeature,
-    layer2
+    initFailed
   };
 }
 
@@ -853,7 +1105,7 @@ async function runHarness(
   selectedFeatureOverride?: FeatureSummary,
   taskOverride?: string
 ): Promise<number> {
-  const context = loadRunContext(opts, cwd, selectedFeatureOverride);
+  const context = loadRunContext(opts, cwd, runnerConfig.runner, selectedFeatureOverride);
   const baseTask = taskOverride ?? opts.task;
   if (!baseTask) throw new Error(`Missing task for ${runnerConfig.runner} runner.`);
   const runnerTask = makeRunnerTask(baseTask, runnerConfig.runner);
@@ -862,14 +1114,13 @@ async function runHarness(
     task: runnerTask,
     runnerConfig,
     generatedAt: new Date().toISOString(),
-    agents: context.agents,
-    contextGate: context.contextGate,
-    gitLog: context.gitLog,
-    initResult: context.initResult,
+    runId: context.runId,
+    preflightEvidencePath: context.preflightEvidencePath,
+    preflight: context.preflight,
+    contextSummaries: context.contextSummaries,
     progressSummary: context.progressSummary,
     features: context.features,
-    selectedFeature: context.selectedFeature,
-    layer2: context.layer2
+    selectedFeature: context.selectedFeature
   });
 
   const runnerOpts = withRunnerConfig(opts, runnerConfig);
@@ -898,16 +1149,26 @@ async function runHarness(
     console.log(
       `[agent.ts] selectedFeature=${context.selectedFeature?.id ?? 'none'} status=${context.selectedFeature?.status ?? '-'}`
     );
-    console.log(`[agent.ts] layer2=${context.layer2.map(doc => doc.path).join(', ')}`);
+    console.log(`[agent.ts] preflight=${relative(cwd, context.preflightEvidencePath)}`);
+    console.log(`[agent.ts] layer2=${context.contextSummaries.layer2.map(doc => doc.sourcePath).join(', ')}`);
     console.log(`[agent.ts] plan=${relative(cwd, planPath)}`);
     console.log(`[agent.ts] command=${formatProviderCommand(providerCommand)}`);
     console.log('\nPrompt written to the plan file above. Re-run without --dry-run to launch the selected provider.');
     return 0;
   }
 
+  if (context.initFailed) {
+    console.error(
+      '[agent.ts] ./init.sh failed. Plan and preflight evidence were written, but Codex will not be launched automatically.'
+    );
+    console.error(`[agent.ts] plan=${relative(cwd, planPath)}`);
+    console.error(`[agent.ts] preflight=${relative(cwd, context.preflightEvidencePath)}`);
+    return 1;
+  }
+
   console.log(`[agent.ts] wrote plan ${relative(cwd, planPath)}`);
   console.log(
-    `[agent.ts] launching ${basename(providerCommand.command)} provider=${runnerOpts.agentProvider} runner=${runnerConfig.runner} feature=${context.selectedFeature?.id ?? 'none'} with ${context.layer2.length} routed docs`
+    `[agent.ts] launching ${basename(providerCommand.command)} provider=${runnerOpts.agentProvider} runner=${runnerConfig.runner} feature=${context.selectedFeature?.id ?? 'none'} with ${context.contextSummaries.layer2.length} routed docs`
   );
   return spawnAgentProvider(providerCommand.command, providerCommand.args, cwd);
 }
@@ -1085,4 +1346,11 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-export { buildProviderInstruction, splitForwardedArgs, toCliOptions };
+export {
+  buildPrompt,
+  buildProviderInstruction,
+  readCachedContextSummary,
+  splitForwardedArgs,
+  summarizeContext,
+  toCliOptions
+};

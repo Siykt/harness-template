@@ -10,6 +10,8 @@
 - 生成的 plan 明确标记这些 preflight evidence 已经由 harness 完成，并要求子 agent 只在证据缺失、失败、过期或用户显式要求时才重跑。
 - 引入可审计的 preflight manifest，例如写入计划文件内的 `Preflight Evidence` block，或额外写入 `.harness/tmp/<run-id>/preflight.json`。
 - 子 agent 仍可读取必要文件来完成任务，但不应机械重复完整启动循环。
+- 对 runner prompt 做上下文瘦身：稳定 contract 放在前缀，动态任务放在后缀，`AGENTS.md`、`CONTEXT-GATE.md`、`feature_list.json`、Layer 2 文档默认只带摘要和 sha256。
+- 在 dispatcher 层增加文件 hash keyed cache，缓存确定性摘要；不依赖 Codex CLI 暴露专用 cache 参数。Codex/OpenAI 的自动 prompt caching 通过稳定前缀间接受益。
 
 待讨论问题：
 
@@ -21,11 +23,13 @@
 
 | ID | Todo | Acceptance | Status |
 | --- | --- | --- | --- |
-| `HT-004-T1` | 明确 preflight ownership 设计。 | 文档或实现说明 `agent.ts` 与子 agent 对 `pwd`、`CONTEXT-GATE.md`、`git log`、`./init.sh`、Layer 1 的职责边界。 | `todo` |
-| `HT-004-T2` | 让 `agent.ts` 生成可复用 preflight evidence。 | 计划文件或临时 JSON 中包含命令、退出码、摘要输出、生成时间和仓库路径。 | `todo` |
-| `HT-004-T3` | 调整 runner prompt，禁止无条件重跑启动流程。 | 子 agent prompt 明确要求复用 harness preflight，只有证据缺失、失败、过期或任务需要时才重跑。 | `todo` |
-| `HT-004-T4` | 保留故障修复能力。 | 当 `./init.sh` 失败时，runner 能看到失败证据和日志尾部，并按 blocker 或修复流程处理。 | `todo` |
-| `HT-004-T5` | 增加回归测试。 | 测试能证明 plan 包含 preflight evidence，并且 prompt 中没有要求子 agent 无条件再次执行 `./init.sh`。 | `todo` |
+| `HT-004-T1` | 明确 preflight ownership 设计。 | 文档或实现说明 `agent.ts` 与子 agent 对 `pwd`、`CONTEXT-GATE.md`、`git log`、`./init.sh`、Layer 1 的职责边界。 | `done` |
+| `HT-004-T2` | 让 `agent.ts` 生成可复用 preflight evidence。 | 计划文件或临时 JSON 中包含命令、退出码、摘要输出、生成时间和仓库路径。 | `done` |
+| `HT-004-T3` | 调整 runner prompt，禁止无条件重跑启动流程。 | 子 agent prompt 明确要求复用 harness preflight，只有证据缺失、失败、过期或任务需要时才重跑。 | `done` |
+| `HT-004-T4` | 保留故障修复能力。 | 当 `./init.sh` 失败时，runner 能看到失败证据和日志尾部，并按 blocker 或修复流程处理。 | `done` |
+| `HT-004-T5` | 增加回归测试。 | 测试能证明 plan 包含 preflight evidence，并且 prompt 中没有要求子 agent 无条件再次执行 `./init.sh`。 | `done` |
+| `HT-004-T6` | 增加 dispatcher 层 context cache。 | `.harness/cache/context` 使用 source path + sha256 + schema version 缓存确定性摘要，文件变更后自动生成新 cache。 | `done` |
+| `HT-004-T7` | 瘦身 runner prompt。 | 默认携带摘要、hash 和路径索引，不再把完整 Layer 0/Layer 2 文档全文放入 plan。 | `done` |
 
 ## Verification
 
