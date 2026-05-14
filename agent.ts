@@ -669,8 +669,28 @@ function extractCurrentStatusAndLatestSession(progress: string): string {
   const status =
     statusStart >= 0 ? progress.slice(statusStart, statusEnd >= 0 ? statusEnd : statusStart + 2000) : progress.slice(0, 2000);
 
-  const latestIdx = progress.lastIndexOf('### Session');
-  const latest = latestIdx >= 0 ? progress.slice(latestIdx) : '';
+  const sessionMatches = [...progress.matchAll(/^### Session[^\n]*$/gm)];
+  const sessions = sessionMatches.flatMap((match, index) => {
+    const heading = match[0];
+    if (/^### Session template\s*$/i.test(heading.trim())) return [];
+
+    const start = match.index ?? 0;
+    const next = sessionMatches[index + 1]?.index;
+    const date = /### Session\s+(\d{4}-\d{2}-\d{2})/.exec(heading)?.[1] ?? '';
+    return [
+      {
+        date,
+        start,
+        text: progress.slice(start, next).trim()
+      }
+    ];
+  });
+
+  const latest =
+    sessions
+      .sort((a, b) => b.date.localeCompare(a.date) || a.start - b.start)
+      .at(0)?.text ?? '';
+
   return `${status.trim()}\n\n--- latest session ---\n${truncate(latest.trim(), 9000)}`;
 }
 
@@ -1349,6 +1369,7 @@ if (process.env.NODE_ENV !== 'test') {
 export {
   buildPrompt,
   buildProviderInstruction,
+  extractCurrentStatusAndLatestSession,
   readCachedContextSummary,
   splitForwardedArgs,
   summarizeContext,

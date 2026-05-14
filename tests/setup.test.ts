@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { agentProviderIds, buildProviderCommand } from '../agent-providers';
-import { buildPrompt, readCachedContextSummary, splitForwardedArgs, summarizeContext, toCliOptions } from '../agent';
+import {
+  buildPrompt,
+  extractCurrentStatusAndLatestSession,
+  readCachedContextSummary,
+  splitForwardedArgs,
+  summarizeContext,
+  toCliOptions
+} from '../agent';
 import {
   buildFeatureAgentDryRunPrompt,
   buildFeatureSpecMarkdown,
@@ -138,6 +145,41 @@ describe('agent CLI options', () => {
 });
 
 describe('runner context cache and preflight prompt', () => {
+  it('extracts the latest real session instead of a trailing template or older appended session', () => {
+    const summary = extractCurrentStatusAndLatestSession(`# 进度日志
+
+## 当前已验证状态
+
+- 当前唯一 active feature：\`HT-004\`
+
+## 会话记录
+
+### Session 2026-05-14 HT-004 coder implementation
+
+- real latest session
+
+### Session 2026-05-14 HT-003 reviewer
+
+- old same-day session
+
+### Session 2026-05-12 README
+
+- older appended session
+
+### Session template
+
+- 日期：
+- 本轮目标：
+`);
+
+    expect(summary).toContain('当前唯一 active feature');
+    expect(summary).toContain('HT-004 coder implementation');
+    expect(summary).toContain('real latest session');
+    expect(summary).not.toContain('Session template');
+    expect(summary).not.toContain('old same-day session');
+    expect(summary).not.toContain('older appended session');
+  });
+
   it('summarizes feature_list.json without carrying evidence or notes payloads', () => {
     const summary = summarizeContext(
       'featureList',
@@ -295,6 +337,102 @@ describe('runner context cache and preflight prompt', () => {
     expect(prompt).toContain('Codex/OpenAI automatic prompt caching');
     expect(prompt).toContain('AGENTS summary only');
     expect(prompt).not.toContain('每轮会话开始时，**严格按此顺序执行**');
+  });
+
+  it('keeps failed init evidence visible in the generated prompt', () => {
+    const prompt = buildPrompt({
+      cwd: '/repo',
+      task: 'Inspect failed preflight.',
+      runnerConfig: {
+        runner: 'coder',
+        model: 'gpt-5.5',
+        effort: 'high',
+        temperature: '0.3'
+      },
+      generatedAt: '2026-05-14T00:00:00.000Z',
+      runId: 'run-failed-init',
+      preflightEvidencePath: '/repo/.harness/runs/run-failed-init/preflight.json',
+      preflight: {
+        schemaVersion: 1,
+        runId: 'run-failed-init',
+        repoRoot: '/repo',
+        generatedAt: '2026-05-14T00:00:00.000Z',
+        featureId: 'HT-004',
+        runner: 'coder',
+        commands: {
+          pwd: { exitCode: 0, stdout: '/repo' },
+          gitLog: { command: 'git log --oneline -5', exitCode: 0, stdout: 'abc123 commit\n', stderr: '' },
+          init: { command: './init.sh', exitCode: 1, stdout: 'Test failed in setup.test.ts', stderr: 'vitest failed' }
+        },
+        context: {
+          agents: {
+            schemaVersion: 1,
+            kind: 'agents',
+            sourcePath: 'AGENTS.md',
+            sourceSha256: 'agents-sha',
+            generatedAt: '2026-05-14T00:00:00.000Z'
+          },
+          contextGate: {
+            schemaVersion: 1,
+            kind: 'contextGate',
+            sourcePath: 'CONTEXT-GATE.md',
+            sourceSha256: 'gate-sha',
+            generatedAt: '2026-05-14T00:00:00.000Z'
+          },
+          featureList: {
+            schemaVersion: 1,
+            kind: 'featureList',
+            sourcePath: 'feature_list.json',
+            sourceSha256: 'features-sha',
+            generatedAt: '2026-05-14T00:00:00.000Z'
+          },
+          layer2: []
+        }
+      },
+      contextSummaries: {
+        agents: {
+          schemaVersion: 1,
+          kind: 'agents',
+          sourcePath: 'AGENTS.md',
+          sourceSha256: 'agents-sha',
+          generatedAt: '2026-05-14T00:00:00.000Z',
+          summary: 'AGENTS summary only'
+        },
+        contextGate: {
+          schemaVersion: 1,
+          kind: 'contextGate',
+          sourcePath: 'CONTEXT-GATE.md',
+          sourceSha256: 'gate-sha',
+          generatedAt: '2026-05-14T00:00:00.000Z',
+          summary: 'CONTEXT summary only'
+        },
+        featureList: {
+          schemaVersion: 1,
+          kind: 'featureList',
+          sourcePath: 'feature_list.json',
+          sourceSha256: 'features-sha',
+          generatedAt: '2026-05-14T00:00:00.000Z',
+          summary: '{"features":[]}'
+        },
+        layer2: []
+      },
+      progressSummary: 'current status summary',
+      features: [],
+      selectedFeature: {
+        id: 'HT-004',
+        title: 'Trim context',
+        status: 'blocked',
+        priority: 4,
+        dependsOn: [],
+        layer2Refs: ['docs/features/HT-004.md']
+      }
+    });
+
+    expect(prompt).toContain('### ./init.sh');
+    expect(prompt).toContain('exit=1');
+    expect(prompt).toContain('Test failed in setup.test.ts');
+    expect(prompt).toContain('vitest failed');
+    expect(prompt).toContain('.harness/runs/run-failed-init/preflight.json');
   });
 });
 

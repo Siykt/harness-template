@@ -12,6 +12,62 @@
 
 ## 会话记录
 
+### Session 2026-05-14 HT-004 blocker fix
+
+- 日期：2026-05-14
+- 本轮目标：修复 `HT-004` reviewer gate 标记的 blocked 问题，并说明根因。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`5de2340`、`0437f28`、`ca578d5`、`b4627ae`、`93c9d18`
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  14 passed (14)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：选定 blocked feature `HT-004`；blocker 来自 reviewer gate。
+  - Layer 2：读取 `docs/features/HT-004-run-context-preflight-cache.md`。
+- Blocker 描述（按 R4，修复前记录）：
+  - `extractCurrentStatusAndLatestSession` 使用 `progress.lastIndexOf("### Session")` 选择最近会话；由于 `claude-progress.md` 文件末尾有 `### Session template`，生成的 runner plan 把模板当成 latest session，丢失最近实际会话证据。
+  - `HT-004` 规格要求 `pnpm test` 覆盖失败证据传递；当前测试缺少 `./init.sh` 失败 evidence 在 plan 中可见的回归覆盖。
+- 已完成：
+  - `agent.ts`：修复 `extractCurrentStatusAndLatestSession`，跳过 `### Session template`，并按 session 标题日期选择最新真实 session；同一天按文件中更靠前的记录优先，适配当前进度日志“新记录插入顶部”的结构。
+  - `agent.ts`：导出 `extractCurrentStatusAndLatestSession` 供回归测试覆盖。
+  - `tests/setup.test.ts`：新增 latest-session 解析测试，覆盖尾部模板和同日旧记录；新增 failed-init evidence 测试，确认 plan 中保留 `./init.sh` exit code、stdout/stderr 和 preflight path。
+  - `feature_list.json`：将 `HT-004.status` 从 `blocked` 恢复为 `pending_review`，追加修复证据和重启说明。
+- 运行过的验证：
+  - `pnpm exec tsc --noEmit`：PASS，exit 0。
+  - `pnpm test`：PASS，`Test Files  1 passed (1)`、`Tests  16 passed (16)`。
+  - `pnpm agent -- --runner coder --feature HT-004 --task "smoke" --dry-run`：PASS，生成 `docs/plans/plan-2026-05-14-coder-006.md` 和 `.harness/runs/2026-05-14T130023-395Z-HT-004-coder/preflight.json`。
+  - `sed -n '280,330p' docs/plans/plan-2026-05-14-coder-006.md`：PASS，`--- latest session ---` 下方为 `### Session 2026-05-14 HT-004 blocker fix`，不再是 `Session template` 或旧的 feature registration session。
+  - `node preflight inspection`：PASS，preflight JSON 中 `init.exitCode` 为 0，init stdout 含 `Tests  16 passed`，featureId 为 `HT-004`。
+  - `pnpm build`：PASS，输出末行 `ESM ⚡️ Build success in 6ms`。
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  16 passed (16)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` PASS；agent dry-run PASS，且 reviewer blocker 复现点已消失。
+- 更新过的文件或工件：
+  - `agent.ts`：修复 latest-session 选择逻辑并导出测试目标。
+  - `tests/setup.test.ts`：新增两个 blocker 回归测试。
+  - `feature_list.json`：`HT-004` 恢复为 `pending_review`，追加证据。
+  - `claude-progress.md`：记录本轮 blocker 修复、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - `HT-004` 仍等待 reviewer 复验，状态为 `pending_review`，未标记 passing。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，修复了模板尾部导致 latest session 错误的问题，并补齐 failed-init evidence 测试。
+  - 验证：2/2，已运行 tsc、test、agent dry-run、plan 检查、preflight 检查、build 和 init。
+  - 范围纪律：2/2，仅修改 HT-004 blocker 相关逻辑、测试和 tracker/progress。
+  - 可靠性：2/2，新增测试覆盖原 reviewer blocker，避免回归。
+  - 可维护性：2/2，latest-session 选择逻辑集中在单函数，测试描述清晰。
+  - 交接准备度：2/2，`HT-004` 已回到 pending_review，reviewer 可直接复验。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  16 passed (16)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 6ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入后执行；最终 `git log --oneline -1` 输出由本轮最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-004.status` 为 `pending_review`，未标记 passing。
+  - PASS 没有任何半成品步骤处于未记录状态：原两个 blocker 已修复并有测试覆盖。
+  - PASS 下一轮会话无需人工修复即可继续：下一步运行 reviewer 复验 `HT-004`。
+- 下一步最佳动作：
+  - reviewer 复验 `HT-004`；若接受，将 `HT-004` 更新为 `passing`。
+
 ### Session 2026-05-14 HT-004 coder implementation
 
 - 日期：2026-05-14
