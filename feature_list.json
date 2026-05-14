@@ -296,7 +296,7 @@
     {
       "id": "HT-006",
       "title": "使用 DAG 支持并行执行",
-      "status": "pending_review",
+      "status": "passing",
       "priority": 6,
       "dependsOn": [
         "HT-005"
@@ -354,14 +354,68 @@
           "date": "2026-05-14",
           "command": "pnpm build",
           "result": "PASS: tsup ESM build success in 7ms."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pwd",
+          "result": "PASS: /Users/apple/Documents/projects/harness-template/.harness/worktrees/2026-05-14T142805-075Z-HT-006-reviewer"
+        },
+        {
+          "date": "2026-05-14",
+          "command": "sed -n '1,240p' CONTEXT-GATE.md",
+          "result": "PASS: hard constraints and Layer 0/Layer 1 loading protocol read."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "git log --oneline -5",
+          "result": "PASS: latest commits include 12264b1 fix: filter HT-006 reviewer dependency blockers, 9a17597 chore: block HT-006 reviewer gate, a8ce093 feat: add HT-006 DAG dispatcher."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "CI=true ./init.sh",
+          "result": "PASS: vitest run completed with Test Files 1 passed (1), Tests 23 passed (23)."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "Layer 1 read: claude-progress.md current status/latest session and feature_list.json {id,title,status,priority}",
+          "result": "PASS: selected unique active review target HT-006 (pending_review)."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "sed -n '1,620p' docs/plans/plan-2026-05-14-reviewer-008.md",
+          "result": "PASS: runner plan and routed docs read; review target is HT-006 DAG parallel dispatcher."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "static inspection: agent.ts and tests/setup.test.ts",
+          "result": "PASS: implementation supports dependsOn parsing, dependency blocker detection for missing/blocked/cyclic dependencies, ready-pool selection, reviewer-first pending_review pool, maxConcurrency capping, worktree/result JSON ownership, and centralized feature/progress finalization. Tests cover ready pool, waiting dependencies, missing/blocked/cyclic blockers, reviewer-before-coder policy, and pending_review dependency blockers."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript type check exited 0."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm test",
+          "result": "PASS: vitest run completed with Test Files 1 passed (1), Tests 23 passed (23)."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 5ms."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "pnpm agent -- --runner dispatcher --dry-run",
+          "result": "PASS: dispatcher selected runner=reviewer readyPool=HT-006 maxConcurrency=2 and dependency status HT-006 dependsOn=[HT-005:passing]; generated reviewer plan with statusOwner=agent.ts."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "sed -n '1,240p' evaluator-rubric.md && sed -n '1,240p' clean-state-checklist.md",
+          "result": "PASS: rubric and clean-state checklist read before finishing; runner contract requires this review result JSON rather than direct progress/tracker finalization."
         }
       ],
-      "blocker": {
-        "date": "2026-05-14",
-        "cause": "Automatic pending_review reviewer pool ignores dependency blockers.",
-        "evidence": "NODE_ENV=test pnpm exec tsx -e direct buildDispatchPool probe returned runner=reviewer, decisions=[HT-002], blockers=[HT-002: dependency HT-001 is blocked] for a pending_review feature depending on a blocked feature.",
-        "restartInstructions": "Filter pending_review candidates with dependencyReason before scheduling reviewer decisions; ensure blocker output remains deterministic; add a regression test where a pending_review feature has a blocked, missing, or cyclic dependency and is not selected; rerun pnpm exec tsc --noEmit, pnpm test, pnpm build, and pnpm agent -- --runner dispatcher --dry-run."
-      },
       "notes": "Blocked reviewer finding fixed: automatic pending_review reviewer pool now excludes features with dependency blockers, so affected features appear only in blockers and are not launched. HT-006 is ready for reviewer re-check."
     }
   ]

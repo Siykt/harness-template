@@ -12,6 +12,37 @@
 
 ## 会话记录
 
+### Session 2026-05-14 HT-006 reviewer dispatcher finalization
+
+- 日期：2026-05-14
+- 本轮目标：由 `agent.ts` 统一落库 HT-006 reviewer runner 的 result.json。
+- 已完成：
+  - 校验 `.harness/worktrees/2026-05-14T142805-075Z-HT-006-reviewer/.harness/runs/2026-05-14T142805-075Z-HT-006-reviewer/result.json`，recommendedStatus=`passing`。
+  - 由主工作树更新 `feature_list.json` 状态和 evidence，子 agent 不直接落库状态。
+  - worktree 路径：`.harness/worktrees/2026-05-14T142805-075Z-HT-006-reviewer`。
+- Runner evidence：
+  - `pwd`：PASS: /Users/apple/Documents/projects/harness-template/.harness/worktrees/2026-05-14T142805-075Z-HT-006-reviewer
+  - `sed -n '1,240p' CONTEXT-GATE.md`：PASS: hard constraints and Layer 0/Layer 1 loading protocol read.
+  - `git log --oneline -5`：PASS: latest commits include 12264b1 fix: filter HT-006 reviewer dependency blockers, 9a17597 chore: block HT-006 reviewer gate, a8ce093 feat: add HT-006 DAG dispatcher.
+  - `CI=true ./init.sh`：PASS: vitest run completed with Test Files 1 passed (1), Tests 23 passed (23).
+  - `Layer 1 read: claude-progress.md current status/latest session and feature_list.json {id,title,status,priority}`：PASS: selected unique active review target HT-006 (pending_review).
+  - `sed -n '1,620p' docs/plans/plan-2026-05-14-reviewer-008.md`：PASS: runner plan and routed docs read; review target is HT-006 DAG parallel dispatcher.
+  - `static inspection: agent.ts and tests/setup.test.ts`：PASS: implementation supports dependsOn parsing, dependency blocker detection for missing/blocked/cyclic dependencies, ready-pool selection, reviewer-first pending_review pool, maxConcurrency capping, worktree/result JSON ownership, and centralized feature/progress finalization. Tests cover ready pool, waiting dependencies, missing/blocked/cyclic blockers, reviewer-before-coder policy, and pending_review dependency blockers.
+  - `pnpm exec tsc --noEmit`：PASS: TypeScript type check exited 0.
+  - `pnpm test`：PASS: vitest run completed with Test Files 1 passed (1), Tests 23 passed (23).
+  - `pnpm build`：PASS: tsup ESM build success in 5ms.
+  - `pnpm agent -- --runner dispatcher --dry-run`：PASS: dispatcher selected runner=reviewer readyPool=HT-006 maxConcurrency=2 and dependency status HT-006 dependsOn=[HT-005:passing]; generated reviewer plan with statusOwner=agent.ts.
+  - `sed -n '1,240p' evaluator-rubric.md && sed -n '1,240p' clean-state-checklist.md`：PASS: rubric and clean-state checklist read before finishing; runner contract requires this review result JSON rather than direct progress/tracker finalization.
+- 回写文件：
+  - 无
+- Blocker：无
+- 备注：
+  - No blocking findings found for HT-006 acceptance.
+  - Rubric: correctness 2/2, verification 2/2, scope discipline 2/2, reliability 2/2, maintainability 2/2, handoff readiness 2/2; conclusion Accept.
+  - Clean-state notes: init passed, build passed, feature_list/claude-progress final status updates are intentionally left to agent.ts status owner per Stable Harness Contract; this runner wrote result.json for finalization.
+  - The prior reviewer blocker is covered by the added pending_review dependency blocker test and the current dispatcher dry-run selects HT-006 only because HT-005 is passing.
+
+
 ### Session 2026-05-14 HT-006 blocker fix
 
 - 日期：2026-05-14
