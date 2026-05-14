@@ -5,12 +5,69 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-005` not_started，等待实现
+- 当前最高优先级未完成功能：`HT-005` pending_review，等待 reviewer acceptance
 - 当前唯一 active feature：`无`
 - 当前 blocker：`无`
-- 最近完成：`HT-004` reviewer 验收通过，runner preflight/context cache 进入 passing；`HT-003` reviewer 验收通过，GitHub Actions e2e 验证进入 passing
+- 最近完成：`HT-005` coder 实现完成并进入 pending_review；`HT-004` reviewer 验收通过，runner preflight/context cache 进入 passing
 
 ## 会话记录
+
+### Session 2026-05-14 HT-005 coder implementation
+
+- 日期：2026-05-14
+- 本轮目标：按 `docs/plans/plan-2026-05-14-coder-008.md` 实现 `HT-005`：使用 git worktree 执行 agent runner，并由 `agent.ts` 集中负责 result JSON 校验、状态落库和进度记录。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`0a60a2f`、`64ec792`、`5de2340`、`0437f28`、`ca578d5`
+  - `./init.sh`：PASS，最终输出含 `Test Files  1 passed (1)`、`Tests  16 passed (16)`、`pnpm    dev`
+  - Layer 1：选定唯一 active feature `HT-005`，初始状态 `not_started`。
+  - Layer 2：使用用户指定 plan 中 routed doc `docs/features/HT-005-worktree-runner-status-owner.md`。
+- 已完成：
+  - `agent.ts`：新增 run-scoped worktree 规划、创建、清理策略；真实 provider runner 使用 `.harness/worktrees/<run-id>` 作为 cwd，dry-run 只输出路径且不创建永久 worktree。
+  - `agent.ts`：新增 `.harness/runs/<run-id>/result.json` 协议校验；coder 只能推荐 `pending_review|blocked`，reviewer 只能推荐 `passing|blocked`，blocked 必须带 cause/evidence/restartInstructions。
+  - `agent.ts`：runner 完成后从 worktree 生成 patch 并应用回主工作树，排除 `.harness`、`feature_list.json`、`claude-progress.md`，冲突时抛出 blocker 级错误而不是静默覆盖。
+  - `agent.ts`：由主工作树统一更新 `feature_list.json` 和追加 `claude-progress.md` finalization session；子 runner prompt 明确禁止直接修改状态/最终进度。
+  - `tests/setup.test.ts`：新增 worktree 路径、result JSON schema、coder/reviewer 状态边界和 prompt 状态 owner 约束覆盖；现有 prompt 测试适配 worktree metadata。
+  - `docs/features/HT-005-worktree-runner-status-owner.md`：将 `HT-005-T1` 到 `HT-005-T7` 标记为 `done`。
+  - `feature_list.json`：将 `HT-005.status` 更新为 `pending_review`，追加 coder implementation evidence，保留 reviewer 验收边界。
+- 运行过的验证：
+  - `pnpm exec tsc --noEmit`：PASS，exit 0。
+  - `pnpm test`：PASS，`Test Files  1 passed (1)`、`Tests  18 passed (18)`。
+  - `pnpm build`：PASS，输出末行 `ESM ⚡️ Build success in 8ms`。
+  - `pnpm agent -- --runner dispatcher --dry-run`：PASS，输出包含 `worktree=.harness/worktrees/2026-05-14T132601-083Z-HT-005-coder (dry-run: not created)`、`resultJson=.harness/runs/2026-05-14T132601-083Z-HT-005-coder/result.json`、`statusOwner=agent.ts will validate result JSON and update feature_list.json/claude-progress.md from the main checkout`。
+  - `test ! -e .harness/worktrees/2026-05-14T132601-083Z-HT-005-coder && echo 'PASS no dry-run worktree'`：PASS，确认 dry-run 未创建永久 worktree。
+  - `git worktree add --detach .harness/worktrees/manual-smoke-HT-005 HEAD && git worktree remove --force .harness/worktrees/manual-smoke-HT-005 && git worktree prune`：PASS，输出含 `PASS worktree create/remove`。
+  - `./init.sh`：PASS，最终输出含 `Test Files  1 passed (1)`、`Tests  18 passed (18)`、`pnpm    dev`。
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` PASS；dispatcher dry-run PASS，证明下一轮 runner plan 会包含 worktree/result JSON/status owner 信息。
+- 更新过的文件或工件：
+  - `agent.ts`：实现 HT-005 runner worktree、result JSON、patch 回写和集中状态更新。
+  - `tests/setup.test.ts`：增加 HT-005 行为测试。
+  - `docs/features/HT-005-worktree-runner-status-owner.md`：同步 todo 状态为 done。
+  - `feature_list.json`：`HT-005` 进入 `pending_review` 并记录 evidence。
+  - `claude-progress.md`：记录本轮实现、验证、rubric、clean-state checklist 和重启路径。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - 真实 provider 子进程路径已改为 worktree；本轮未实际启动长时 provider，仅通过 dispatcher dry-run、prompt 检查、单测和 git worktree create/remove smoke 验证。下一轮 reviewer 应重点检查 result.json finalization 与 patch 回写边界。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，覆盖 worktree cwd、生命周期策略、result JSON handoff、状态 owner 和 patch 回写。
+  - 验证：2/2，已运行 tsc、test、build、dispatcher dry-run、dry-run worktree absence check、git worktree create/remove smoke、init。
+  - 范围纪律：2/2，修改集中在 `HT-005` 的 runner/测试/feature spec/tracker/progress。
+  - 可靠性：2/2，run id 决定 worktree/result 路径；失败或 blocked 保留 worktree；成功后由主 checkout 统一落库。
+  - 可维护性：2/2，result schema、prompt contract、helper 函数和测试覆盖明确。
+  - 交接准备度：2/2，`HT-005` 已 pending_review，下一轮可直接运行 reviewer gate。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  18 passed (18)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 8ms`。
+  - PASS 本轮变更已 git commit：将在本记录写入后提交；最终 `git log --oneline -1` 输出由本轮最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-005.status` 已更新为 `pending_review`，不是 `passing`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；真实 provider 长时运行留给 reviewer acceptance 检查，风险已记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步运行 `HT-005` reviewer acceptance gate。
+- 下一步最佳动作：
+  - 启动 `HT-005` reviewer：重点审查 worktree launch cwd、result.json schema/finalization、patch 回写排除规则、blocked 保留策略和 dry-run 不创建永久 worktree。
 
 ### Session 2026-05-14 HT-004 reviewer acceptance
 

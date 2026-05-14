@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { type ArgsDef, defineCommand, parseArgs as parseCittyArgs, type ParsedArgs, runMain } from 'citty';
@@ -42,6 +42,34 @@ interface DispatcherRunResult {
   exitCode: number;
   previousStatus?: string;
   stopReason?: 'blocked' | 'no_work';
+}
+
+interface RunnerWorktree {
+  runId: string;
+  path: string;
+  resultJsonPath: string;
+  cleanupPolicy: string;
+}
+
+interface RunnerResultEvidence {
+  command: string;
+  result: string;
+}
+
+interface RunnerResult {
+  schemaVersion: number;
+  runId: string;
+  featureId: string;
+  runner: ProviderRunnerMode;
+  recommendedStatus: 'pending_review' | 'passing' | 'blocked';
+  evidence: RunnerResultEvidence[];
+  changedFiles: string[];
+  blocker?: {
+    cause: string;
+    evidence: string;
+    restartInstructions: string;
+  };
+  notes?: string[];
 }
 
 type ContextSummaryKind = 'agents' | 'contextGate' | 'featureList' | 'featureDoc';
@@ -92,6 +120,7 @@ const DEFAULT_REVIEWER_EFFORT = 'high';
 const DEFAULT_REVIEWER_TEMPERATURE = '0';
 const CONTEXT_SUMMARY_SCHEMA_VERSION = 1;
 const PREFLIGHT_SCHEMA_VERSION = 1;
+const RUNNER_RESULT_SCHEMA_VERSION = 1;
 
 type ProviderRunnerMode = 'coder' | 'reviewer';
 type RunnerMode = ProviderRunnerMode | 'dispatcher' | 'feature';
@@ -481,6 +510,10 @@ function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
+function safeRunIdPathSegment(runId: string): string {
+  return runId.replace(/[^a-zA-Z0-9._-]+/g, '-');
+}
+
 function cacheSafePath(path: string): string {
   return path.replace(/[^a-zA-Z0-9._-]+/g, '_');
 }
@@ -663,6 +696,37 @@ function createRunId(feature: FeatureSummary | undefined, runner: ProviderRunner
   return `${timestamp}-${feature?.id ?? 'no-feature'}-${runner}`;
 }
 
+function planRunnerWorktree(cwd: string, runId: string): RunnerWorktree {
+  const worktreePath = resolve(cwd, '.harness/worktrees', safeRunIdPathSegment(runId));
+  return {
+    runId,
+    path: worktreePath,
+    resultJsonPath: join(worktreePath, '.harness/runs', runId, 'result.json'),
+    cleanupPolicy:
+      'dry-run: do not create a permanent worktree; success: remove after patch/result finalization; failure or blocked: preserve for inspection.'
+  };
+}
+
+function createRunnerWorktree(cwd: string, worktree: RunnerWorktree): void {
+  if (existsSync(worktree.path)) rmSync(worktree.path, { recursive: true, force: true });
+  ensureDir(resolve(cwd, '.harness/worktrees'));
+  const result = run('git', ['worktree', 'add', '--detach', worktree.path, 'HEAD'], cwd, 120_000);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to create runner worktree at ${worktree.path}:\n${result.stdout}\n${result.stderr}`);
+  }
+
+  const mainNodeModules = resolve(cwd, 'node_modules');
+  const worktreeNodeModules = join(worktree.path, 'node_modules');
+  if (existsSync(mainNodeModules) && !existsSync(worktreeNodeModules)) symlinkSync(mainNodeModules, worktreeNodeModules, 'dir');
+  ensureDir(join(worktree.path, '.harness/runs', worktree.runId));
+}
+
+function removeRunnerWorktree(cwd: string, worktree: RunnerWorktree): void {
+  const result = run('git', ['worktree', 'remove', '--force', worktree.path], cwd, 120_000);
+  if (result.exitCode !== 0 && existsSync(worktree.path)) rmSync(worktree.path, { recursive: true, force: true });
+  run('git', ['worktree', 'prune'], cwd, 120_000);
+}
+
 function extractCurrentStatusAndLatestSession(progress: string): string {
   const statusStart = progress.indexOf('## 当前已验证状态');
   const statusEnd = progress.indexOf('## 会话记录', statusStart);
@@ -704,6 +768,185 @@ function parseFeatureSummaries(raw: string): FeatureSummary[] {
     dependsOn: Array.isArray(feature.dependsOn) ? feature.dependsOn.map(ref => String(ref)) : [],
     layer2Refs: Array.isArray(feature.layer2_refs) ? feature.layer2_refs.map(ref => String(ref)) : []
   }));
+}
+
+function isRunnerResultEvidence(value: unknown): value is RunnerResultEvidence {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.command === 'string' && typeof candidate.result === 'string';
+}
+
+function validateRunnerResult(raw: string, expected: { runId: string; featureId: string; runner: ProviderRunnerMode }): RunnerResult {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const recommendedStatus = parsed.recommendedStatus;
+  if (
+    parsed.schemaVersion !== RUNNER_RESULT_SCHEMA_VERSION ||
+    parsed.runId !== expected.runId ||
+    parsed.featureId !== expected.featureId ||
+    parsed.runner !== expected.runner
+  ) {
+    throw new Error('runner result does not match the expected schema, run id, feature id, or runner');
+  }
+
+  const allowedStatuses =
+    expected.runner === 'coder' ? new Set(['pending_review', 'blocked']) : new Set(['passing', 'blocked']);
+  if (typeof recommendedStatus !== 'string' || !allowedStatuses.has(recommendedStatus)) {
+    throw new Error(
+      `runner result recommendedStatus must be one of ${[...allowedStatuses].join(', ')} for ${expected.runner}`
+    );
+  }
+
+  if (!Array.isArray(parsed.evidence) || !parsed.evidence.every(isRunnerResultEvidence)) {
+    throw new Error('runner result evidence must be an array of { command, result } entries');
+  }
+  if (!Array.isArray(parsed.changedFiles) || !parsed.changedFiles.every(file => typeof file === 'string')) {
+    throw new Error('runner result changedFiles must be an array of strings');
+  }
+  if (recommendedStatus === 'blocked') {
+    const blocker = parsed.blocker as Record<string, unknown> | undefined;
+    if (
+      !blocker ||
+      typeof blocker.cause !== 'string' ||
+      typeof blocker.evidence !== 'string' ||
+      typeof blocker.restartInstructions !== 'string'
+    ) {
+      throw new Error('blocked runner result must include blocker cause, evidence, and restartInstructions');
+    }
+  }
+  if (parsed.notes !== undefined && (!Array.isArray(parsed.notes) || !parsed.notes.every(note => typeof note === 'string'))) {
+    throw new Error('runner result notes must be an array of strings when present');
+  }
+
+  return parsed as unknown as RunnerResult;
+}
+
+function appendProgressSession(cwd: string, result: RunnerResult, worktree: RunnerWorktree): void {
+  const progressPath = resolve(cwd, 'claude-progress.md');
+  const progress = readText(progressPath);
+  const marker = '## 会话记录';
+  const markerIndex = progress.indexOf(marker);
+  if (markerIndex < 0) throw new Error('claude-progress.md is missing ## 会话记录');
+
+  const insertAt = progress.indexOf('\n', markerIndex);
+  const today = formatLocalDate();
+  const evidenceLines = result.evidence.map(item => `  - \`${item.command}\`：${item.result}`).join('\n');
+  const changedFiles = result.changedFiles.length > 0 ? result.changedFiles.map(file => `  - \`${file}\``).join('\n') : '  - 无';
+  const blockerLines = result.blocker
+    ? [
+        '- Blocker：',
+        `  - 原因：${result.blocker.cause}`,
+        `  - 证据：${result.blocker.evidence}`,
+        `  - 重启路径：${result.blocker.restartInstructions}`
+      ].join('\n')
+    : '- Blocker：无';
+  const notes = result.notes?.length ? result.notes.map(note => `  - ${note}`).join('\n') : '  - 无';
+  const session = `
+
+### Session ${today} ${result.featureId} ${result.runner} dispatcher finalization
+
+- 日期：${today}
+- 本轮目标：由 \`agent.ts\` 统一落库 ${result.featureId} ${result.runner} runner 的 result.json。
+- 已完成：
+  - 校验 \`${relative(cwd, worktree.resultJsonPath)}\`，recommendedStatus=\`${result.recommendedStatus}\`。
+  - 由主工作树更新 \`feature_list.json\` 状态和 evidence，子 agent 不直接落库状态。
+  - worktree 路径：\`${relative(cwd, worktree.path)}\`。
+- Runner evidence：
+${evidenceLines}
+- 回写文件：
+${changedFiles}
+${blockerLines}
+- 备注：
+${notes}
+`;
+
+  writeFileSync(progressPath, `${progress.slice(0, insertAt)}${session}${progress.slice(insertAt)}`, 'utf8');
+}
+
+function updateFeatureListFromRunnerResult(cwd: string, result: RunnerResult): void {
+  const featureListPath = resolve(cwd, 'feature_list.json');
+  const parsed = JSON.parse(readText(featureListPath)) as { features?: Array<Record<string, unknown>> };
+  const features = parsed.features ?? [];
+  const feature = features.find(candidate => candidate.id === result.featureId);
+  if (!feature) throw new Error(`Cannot update missing feature from runner result: ${result.featureId}`);
+
+  feature.status = result.recommendedStatus;
+  const evidence = Array.isArray(feature.evidence) ? feature.evidence : [];
+  feature.evidence = [
+    ...evidence,
+    ...result.evidence.map(item => ({
+      date: formatLocalDate(),
+      command: item.command,
+      result: item.result
+    }))
+  ];
+  if (result.blocker) {
+    feature.blocker = {
+      date: formatLocalDate(),
+      ...result.blocker
+    };
+  } else {
+    delete feature.blocker;
+  }
+
+  writeFileSync(featureListPath, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+}
+
+function applyWorktreePatchToMain(cwd: string, worktree: RunnerWorktree): string[] {
+  run('git', ['add', '-N', '.'], worktree.path, 120_000);
+  const diff = run(
+    'git',
+    ['diff', '--binary', '--', '.', ':(exclude).harness', ':(exclude)feature_list.json', ':(exclude)claude-progress.md'],
+    worktree.path,
+    120_000
+  );
+  if (diff.exitCode !== 0) throw new Error(`Failed to inspect worktree diff:\n${diff.stdout}\n${diff.stderr}`);
+  if (!diff.stdout.trim()) return [];
+
+  const check = spawnSync('git', ['apply', '--check', '--whitespace=nowarn', '-'], {
+    cwd,
+    input: diff.stdout,
+    encoding: 'utf8',
+    timeout: 120_000,
+    maxBuffer: 20 * 1024 * 1024
+  });
+  if (check.status !== 0) {
+    throw new Error(`Worktree patch cannot be applied cleanly to the main checkout:\n${check.stdout ?? ''}\n${check.stderr ?? ''}`);
+  }
+
+  const apply = spawnSync('git', ['apply', '--whitespace=nowarn', '-'], {
+    cwd,
+    input: diff.stdout,
+    encoding: 'utf8',
+    timeout: 120_000,
+    maxBuffer: 20 * 1024 * 1024
+  });
+  if (apply.status !== 0) {
+    throw new Error(`Failed to apply worktree patch to the main checkout:\n${apply.stdout ?? ''}\n${apply.stderr ?? ''}`);
+  }
+
+  const changed = run('git', ['-C', worktree.path, 'diff', '--name-only', '--', '.', ':(exclude).harness'], cwd, 120_000);
+  return changed.stdout
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(file => file !== 'feature_list.json' && file !== 'claude-progress.md');
+}
+
+function finalizeRunnerResult(cwd: string, worktree: RunnerWorktree, feature: FeatureSummary, runner: ProviderRunnerMode): RunnerResult {
+  if (!existsSync(worktree.resultJsonPath)) {
+    throw new Error(`Runner did not write result JSON: ${relative(cwd, worktree.resultJsonPath)}`);
+  }
+
+  const result = validateRunnerResult(readText(worktree.resultJsonPath), {
+    runId: worktree.runId,
+    featureId: feature.id,
+    runner
+  });
+  const changedFiles = applyWorktreePatchToMain(cwd, worktree);
+  result.changedFiles = [...new Set([...result.changedFiles, ...changedFiles])].sort();
+  updateFeatureListFromRunnerResult(cwd, result);
+  appendProgressSession(cwd, result, worktree);
+  return result;
 }
 
 function readFeatureSummaries(): FeatureSummary[] {
@@ -846,6 +1089,7 @@ function buildPrompt(params: {
   generatedAt: string;
   runId: string;
   preflightEvidencePath: string;
+  worktree: RunnerWorktree;
   preflight: PreflightEvidence;
   contextSummaries: {
     agents: ContextSummary;
@@ -868,6 +1112,9 @@ function buildPrompt(params: {
   const layer2Block = params.contextSummaries.layer2
     .map(doc => `### ${doc.sourcePath}\nsha256=${doc.sourceSha256}\n${doc.summary}`)
     .join('\n\n');
+  const resultJsonInWorktree = relative(params.worktree.path, params.worktree.resultJsonPath);
+  const recommendedStatusSchema =
+    params.runnerConfig.runner === 'coder' ? 'pending_review|blocked' : 'passing|blocked';
 
   const runnerContract =
     params.runnerConfig.runner === 'coder'
@@ -877,17 +1124,20 @@ function buildPrompt(params: {
 - Make scoped code/documentation edits where needed.
 - Favor practical implementation exploration. Target temperature: ${params.runnerConfig.temperature}.
 - Run the smallest useful checks first, then the repository-required checks before finishing.
-- Update progress/tracker files and commit when AGENTS.md requires it.
-- If you finish implementation and validation, set the selected feature to pending_review, not passing.
-- If you are blocked, set the selected feature to blocked and write a blocked report with cause, evidence, and restart instructions.`
+- Do not edit feature_list.json or claude-progress.md directly for status/progress finalization.
+- Write ${resultJsonInWorktree} with recommendedStatus, evidence, changedFiles, blocker, and notes.
+- If you finish implementation and validation, recommend pending_review, not passing.
+- If you are blocked, recommend blocked and write a blocked report with cause, evidence, and restart instructions in result.json.`
       : `You are the REVIEWER runner.
 
 - Take a code-review and acceptance-gate stance.
 - Be strict, deterministic, and evidence-driven. Target temperature: ${params.runnerConfig.temperature}.
 - Prioritize bugs, regressions, missing tests, unsafe state transitions, and evidence gaps.
-- Do not make broad implementation changes. Only edit progress/tracker files if you are recording review evidence, blockers, or checklist results.
-- If the work is acceptable, set the selected feature to passing with command evidence.
-- If not acceptable, set the selected feature to blocked and write a blocked report with exact blockers.`;
+- Do not make broad implementation changes.
+- Do not edit feature_list.json or claude-progress.md directly for status/progress finalization.
+- Write ${resultJsonInWorktree} with recommendedStatus, evidence, changedFiles, blocker, and notes.
+- If the work is acceptable, recommend passing with command evidence.
+- If not acceptable, recommend blocked and write exact blockers in result.json.`;
 
   return `# Codex Runner Plan
 
@@ -901,6 +1151,8 @@ function buildPrompt(params: {
 - Selected feature: ${selected}
 - User task: ${params.task}
 - Preflight evidence: ${relative(params.cwd, params.preflightEvidencePath)}
+- Execution worktree: ${relative(params.cwd, params.worktree.path)}
+- Result JSON: ${relative(params.cwd, params.worktree.resultJsonPath)}
 - Routed docs: ${params.contextSummaries.layer2.map(doc => doc.sourcePath).join(', ') || 'none'}
 
 ---
@@ -916,6 +1168,11 @@ This prompt was generated by agent.ts. It has already split the repository AGENT
 
 - agent.ts is the preflight owner for this runner invocation.
 - The downstream runner is the execution owner for the selected task.
+- The downstream runner must work inside the run-scoped git worktree: ${params.worktree.path}
+- The downstream runner must not directly update feature_list.json status or claude-progress.md final progress; agent.ts owns those updates in the main checkout after validating result.json.
+- The downstream runner must write result JSON at: ${params.worktree.resultJsonPath}
+- Result JSON schema: {"schemaVersion":1,"runId":"${params.runId}","featureId":"${params.selectedFeature?.id ?? ''}","runner":"${params.runnerConfig.runner}","recommendedStatus":"${recommendedStatusSchema}","evidence":[{"command":"...","result":"..."}],"changedFiles":["..."],"blocker":{"cause":"...","evidence":"...","restartInstructions":"..."},"notes":["..."]}.
+- Worktree lifecycle: ${params.worktree.cleanupPolicy}
 - Treat the preflight evidence file as the canonical startup evidence for run ${params.runId}.
 - Do not repeat the full startup protocol unless evidence is missing or failed, you changed files that invalidate it, the user explicitly asks, or you need a narrower verification command for your implementation.
 - Keep stable, repeated instructions near the top of this plan so Codex/OpenAI automatic prompt caching can reuse the shared prefix when available.
@@ -1126,6 +1383,7 @@ async function runHarness(
   taskOverride?: string
 ): Promise<number> {
   const context = loadRunContext(opts, cwd, runnerConfig.runner, selectedFeatureOverride);
+  const worktree = planRunnerWorktree(cwd, context.runId);
   const baseTask = taskOverride ?? opts.task;
   if (!baseTask) throw new Error(`Missing task for ${runnerConfig.runner} runner.`);
   const runnerTask = makeRunnerTask(baseTask, runnerConfig.runner);
@@ -1136,6 +1394,7 @@ async function runHarness(
     generatedAt: new Date().toISOString(),
     runId: context.runId,
     preflightEvidencePath: context.preflightEvidencePath,
+    worktree,
     preflight: context.preflight,
     contextSummaries: context.contextSummaries,
     progressSummary: context.progressSummary,
@@ -1146,6 +1405,7 @@ async function runHarness(
   const runnerOpts = withRunnerConfig(opts, runnerConfig);
   const planPath = writePlanFile(cwd, opts.planDir, prompt, runnerConfig.runner);
   const providerInstruction = buildProviderInstruction(cwd, planPath);
+  const providerCwd = opts.dryRun ? worktree.path : worktree.path;
   const providerCommand = buildProviderCommand({
     provider: runnerOpts.agentProvider,
     agentBin: runnerOpts.agentBin,
@@ -1156,7 +1416,7 @@ async function runHarness(
     dangerouslySkipPermissions: runnerOpts.dangerouslySkipPermissions,
     continueSession: runnerOpts.continueSession,
     resume: runnerOpts.resume,
-    cwd,
+    cwd: providerCwd,
     instruction: providerInstruction,
     extraAgentArgs: runnerOpts.extraAgentArgs
   });
@@ -1170,6 +1430,9 @@ async function runHarness(
       `[agent.ts] selectedFeature=${context.selectedFeature?.id ?? 'none'} status=${context.selectedFeature?.status ?? '-'}`
     );
     console.log(`[agent.ts] preflight=${relative(cwd, context.preflightEvidencePath)}`);
+    console.log(`[agent.ts] worktree=${relative(cwd, worktree.path)} (dry-run: not created)`);
+    console.log(`[agent.ts] resultJson=${relative(worktree.path, worktree.resultJsonPath)}`);
+    console.log('[agent.ts] statusOwner=agent.ts will validate result JSON and update feature_list.json/claude-progress.md from the main checkout');
     console.log(`[agent.ts] layer2=${context.contextSummaries.layer2.map(doc => doc.sourcePath).join(', ')}`);
     console.log(`[agent.ts] plan=${relative(cwd, planPath)}`);
     console.log(`[agent.ts] command=${formatProviderCommand(providerCommand)}`);
@@ -1186,11 +1449,32 @@ async function runHarness(
     return 1;
   }
 
+  createRunnerWorktree(cwd, worktree);
+  const worktreePlanPath = resolve(worktree.path, relative(cwd, planPath));
+  ensureDir(resolve(worktree.path, relative(cwd, opts.planDir)));
+  writeFileSync(worktreePlanPath, `${prompt.trimEnd()}\n`, 'utf8');
+
   console.log(`[agent.ts] wrote plan ${relative(cwd, planPath)}`);
+  console.log(`[agent.ts] runner worktree ${relative(cwd, worktree.path)}`);
   console.log(
     `[agent.ts] launching ${basename(providerCommand.command)} provider=${runnerOpts.agentProvider} runner=${runnerConfig.runner} feature=${context.selectedFeature?.id ?? 'none'} with ${context.contextSummaries.layer2.length} routed docs`
   );
-  return spawnAgentProvider(providerCommand.command, providerCommand.args, cwd);
+  const exitCode = await spawnAgentProvider(providerCommand.command, providerCommand.args, worktree.path);
+  if (exitCode !== 0) {
+    console.error(`[agent.ts] runner exited with code ${exitCode}; preserving worktree ${relative(cwd, worktree.path)}`);
+    return exitCode;
+  }
+
+  if (!context.selectedFeature) throw new Error('Runner completed without a selected feature.');
+  const result = finalizeRunnerResult(cwd, worktree, context.selectedFeature, runnerConfig.runner);
+  if (result.recommendedStatus === 'blocked') {
+    console.error(`[agent.ts] runner recommended blocked; preserving worktree ${relative(cwd, worktree.path)}`);
+    return 1;
+  }
+
+  removeRunnerWorktree(cwd, worktree);
+  console.log(`[agent.ts] finalized ${result.featureId} -> ${result.recommendedStatus}`);
+  return 0;
 }
 
 async function runDispatcherOnce(opts: CliOptions, cwd: string, iteration?: number): Promise<DispatcherRunResult> {
@@ -1370,8 +1654,10 @@ export {
   buildPrompt,
   buildProviderInstruction,
   extractCurrentStatusAndLatestSession,
+  planRunnerWorktree,
   readCachedContextSummary,
   splitForwardedArgs,
   summarizeContext,
-  toCliOptions
+  toCliOptions,
+  validateRunnerResult
 };

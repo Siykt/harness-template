@@ -6,10 +6,12 @@ import { agentProviderIds, buildProviderCommand } from '../agent-providers';
 import {
   buildPrompt,
   extractCurrentStatusAndLatestSession,
+  planRunnerWorktree,
   readCachedContextSummary,
   splitForwardedArgs,
   summarizeContext,
-  toCliOptions
+  toCliOptions,
+  validateRunnerResult
 } from '../agent';
 import {
   buildFeatureAgentDryRunPrompt,
@@ -237,6 +239,12 @@ describe('runner context cache and preflight prompt', () => {
       generatedAt: '2026-05-14T00:00:00.000Z',
       runId: 'run-HT-004-coder',
       preflightEvidencePath: '/repo/.harness/runs/run-HT-004-coder/preflight.json',
+      worktree: {
+        runId: 'run-HT-004-coder',
+        path: '/repo/.harness/worktrees/run-HT-004-coder',
+        resultJsonPath: '/repo/.harness/worktrees/run-HT-004-coder/.harness/runs/run-HT-004-coder/result.json',
+        cleanupPolicy: 'test cleanup policy'
+      },
       preflight: {
         schemaVersion: 1,
         runId: 'run-HT-004-coder',
@@ -334,6 +342,9 @@ describe('runner context cache and preflight prompt', () => {
     expect(prompt).toContain('## Stable Harness Contract');
     expect(prompt).toContain('preflight evidence file as the canonical startup evidence');
     expect(prompt).toContain('.harness/runs/run-HT-004-coder/preflight.json');
+    expect(prompt).toContain('Execution worktree: .harness/worktrees/run-HT-004-coder');
+    expect(prompt).toContain('must not directly update feature_list.json status or claude-progress.md');
+    expect(prompt).toContain('Result JSON schema');
     expect(prompt).toContain('Codex/OpenAI automatic prompt caching');
     expect(prompt).toContain('AGENTS summary only');
     expect(prompt).not.toContain('每轮会话开始时，**严格按此顺序执行**');
@@ -352,6 +363,12 @@ describe('runner context cache and preflight prompt', () => {
       generatedAt: '2026-05-14T00:00:00.000Z',
       runId: 'run-failed-init',
       preflightEvidencePath: '/repo/.harness/runs/run-failed-init/preflight.json',
+      worktree: {
+        runId: 'run-failed-init',
+        path: '/repo/.harness/worktrees/run-failed-init',
+        resultJsonPath: '/repo/.harness/worktrees/run-failed-init/.harness/runs/run-failed-init/result.json',
+        cleanupPolicy: 'test cleanup policy'
+      },
       preflight: {
         schemaVersion: 1,
         runId: 'run-failed-init',
@@ -433,6 +450,63 @@ describe('runner context cache and preflight prompt', () => {
     expect(prompt).toContain('Test failed in setup.test.ts');
     expect(prompt).toContain('vitest failed');
     expect(prompt).toContain('.harness/runs/run-failed-init/preflight.json');
+  });
+
+  it('plans runner worktrees and result JSON paths from the run id', () => {
+    const worktree = planRunnerWorktree('/repo', '2026-05-14T000000-000Z-HT-005-coder');
+
+    expect(worktree.path).toBe('/repo/.harness/worktrees/2026-05-14T000000-000Z-HT-005-coder');
+    expect(worktree.resultJsonPath).toBe(
+      '/repo/.harness/worktrees/2026-05-14T000000-000Z-HT-005-coder/.harness/runs/2026-05-14T000000-000Z-HT-005-coder/result.json'
+    );
+    expect(worktree.cleanupPolicy).toContain('dry-run');
+    expect(worktree.cleanupPolicy).toContain('blocked');
+  });
+
+  it('validates runner result JSON and enforces runner-owned status transitions', () => {
+    const coderResult = validateRunnerResult(
+      JSON.stringify({
+        schemaVersion: 1,
+        runId: 'run-HT-005-coder',
+        featureId: 'HT-005',
+        runner: 'coder',
+        recommendedStatus: 'pending_review',
+        evidence: [{ command: 'pnpm test', result: 'PASS' }],
+        changedFiles: ['agent.ts'],
+        notes: ['ready for reviewer']
+      }),
+      { runId: 'run-HT-005-coder', featureId: 'HT-005', runner: 'coder' }
+    );
+
+    expect(coderResult.recommendedStatus).toBe('pending_review');
+    expect(() =>
+      validateRunnerResult(
+        JSON.stringify({
+          schemaVersion: 1,
+          runId: 'run-HT-005-coder',
+          featureId: 'HT-005',
+          runner: 'coder',
+          recommendedStatus: 'passing',
+          evidence: [{ command: 'pnpm test', result: 'PASS' }],
+          changedFiles: []
+        }),
+        { runId: 'run-HT-005-coder', featureId: 'HT-005', runner: 'coder' }
+      )
+    ).toThrow('recommendedStatus');
+    expect(() =>
+      validateRunnerResult(
+        JSON.stringify({
+          schemaVersion: 1,
+          runId: 'run-HT-005-reviewer',
+          featureId: 'HT-005',
+          runner: 'reviewer',
+          recommendedStatus: 'blocked',
+          evidence: [{ command: 'pnpm test', result: 'FAIL' }],
+          changedFiles: []
+        }),
+        { runId: 'run-HT-005-reviewer', featureId: 'HT-005', runner: 'reviewer' }
+      )
+    ).toThrow('blocked runner result');
   });
 });
 
