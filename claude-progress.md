@@ -5,12 +5,65 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-006` pending_review，等待 reviewer 验收 DAG parallel dispatcher
+- 当前最高优先级未完成功能：`HT-006` blocked，reviewer gate 发现 pending_review dependency blocker 仍会被调度
 - 当前唯一 active feature：`无`
-- 当前 blocker：`无`
-- 最近完成：`HT-006` coder 实现完成并进入 pending_review；`HT-005` reviewer 验收通过，worktree runner/status owner 进入 passing
+- 当前 blocker：`HT-006` automatic reviewer pool 未过滤 dependency blocker
+- 最近完成：`HT-005` reviewer 验收通过，worktree runner/status owner 进入 passing；`HT-006` coder 实现已进入 reviewer，但本轮未通过验收
 
 ## 会话记录
+
+### Session 2026-05-14 HT-006 reviewer acceptance gate
+
+- 日期：2026-05-14
+- 本轮目标：按 `docs/plans/plan-2026-05-14-reviewer-005.md` 对 `HT-006` 做严格 reviewer acceptance gate；可接受则标记 passing，否则标记 blocked 并记录可重启证据。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `AGENTS.md`、`CONTEXT-GATE.md`，并按用户要求读取 `docs/plans/plan-2026-05-14-reviewer-005.md`
+  - `git log --oneline -5`：`a8ce093`、`88cc8c0`、`4fbb371`、`0a60a2f`、`64ec792`
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  22 passed (22)`、`pnpm    dev`
+  - Layer 1：选定唯一 active feature `HT-006`，原状态为 `pending_review`。
+  - Layer 2：读取 `docs/features/HT-006-dag-parallel-dispatcher.md`。
+- 已完成：
+  - 静态审查 `agent.ts` 的 `buildDispatchPool`、dependency blocker 计算、reviewer/coder pool 分离和 dispatcher dry-run 输出。
+  - 静态审查 `tests/setup.test.ts` 的 DAG dispatcher planning 测试覆盖。
+  - 判定不接受：自动 reviewer pool 直接使用所有 `pending_review` feature，没有过滤 `dependencyReason`；因此一个带 blocked/missing/cyclic dependency blocker 的 `pending_review` feature 仍会被启动。
+  - 更新 `feature_list.json`：将 `HT-006.status` 从 `pending_review` 更新为 `blocked`，追加 reviewer blocked evidence、blocker 和 restart instructions。
+- 运行过的验证：
+  - `pnpm exec tsc --noEmit`：PASS，exit 0。
+  - `pnpm test`：PASS，`Test Files  1 passed (1)`、`Tests  22 passed (22)`。
+  - `pnpm agent -- --runner dispatcher --dry-run`：PASS，当前仓库状态下输出 `runner=reviewer readyPool=HT-006 maxConcurrency=2`、`HT-006 dependsOn=[HT-005:passing]`，并生成 `docs/plans/plan-2026-05-14-reviewer-006.md`。
+  - `NODE_ENV=test pnpm exec tsx -e direct buildDispatchPool dependency-blocker probe`：FAIL for acceptance，输出 `decisions: ["HT-002"]` 且 `blockers: ["HT-002: dependency HT-001 is blocked"]`，说明同一 affected feature 同时被标为 blocker 和待启动 reviewer decision。
+  - `pnpm build`：PASS，输出末行 `ESM ⚡️ Build success in 6ms`。
+  - `./init.sh`：PASS，最后 3 行含 `Tests  22 passed (22)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` PASS；dispatcher dry-run 对当前真实 `HT-006 -> HT-005:passing` 路径 PASS，但人工构造的 pending_review blocked-dependency probe 暴露规格违反。
+- 更新过的文件或工件：
+  - `feature_list.json`：`HT-006` 标记为 `blocked`，追加 reviewer blocked evidence、blocker cause/evidence/restartInstructions。
+  - `claude-progress.md`：记录本轮 reviewer 验收、验证、blocker、rubric 和 clean-state checklist。
+  - `docs/plans/plan-2026-05-14-reviewer-006.md`、`.harness/runs/2026-05-14T135013-361Z-HT-006-reviewer/preflight.json`：本轮 dispatcher dry-run 生成的验收工件。
+- 已知风险或未解决问题：
+  - BLOCKER：`buildDispatchPool` 的 automatic `pending_review` reviewer pool 未过滤 dependency blocker，违反 `HT-006` 要求的 missing/blocked/cyclic dependency 不启动 affected feature。
+  - BLOCKER：测试缺少 pending_review + blocked/missing/cyclic dependency 不被 reviewer pool 选中的回归覆盖。
+  - 重启路径：在构建 `pendingReview` reviewer pool 时排除 `dependencyReason(feature)` 非空的 feature，保留 deterministic blockers 输出；补充 pending_review blocked/missing/cyclic dependency 测试；复跑 `pnpm exec tsc --noEmit`、`pnpm test`、`pnpm build`、`pnpm agent -- --runner dispatcher --dry-run`。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：1/2，not_started DAG planning 主路径可用，但 pending_review affected feature 仍可能越过 dependency blocker 被启动。
+  - 验证：1/2，tsc/test/build/dry-run 均通过，但测试缺少 pending_review dependency blocker 路径；direct probe 暴露验收失败。
+  - 范围纪律：2/2，本轮 reviewer 仅修改 tracker 和进度记录，未改生产实现或测试。
+  - 可靠性：1/2，dispatcher 输出 blocker，但仍可调度同一 blocked affected feature，重跑时行为不可靠。
+  - 可维护性：2/2，blocker、证据和重启路径明确，修复范围集中在 `buildDispatchPool` 与相关测试。
+  - 交接准备度：2/2，`feature_list.json` 已标记 blocked，下一轮可直接修复并复审。
+  - 结论：Block。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  22 passed (22)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 6ms`。
+  - PASS 本轮变更已 git commit：已执行 `git commit` 并随后 `git commit --amend --no-edit` 纳入 checklist 记录；最终 `git log --oneline -1` 输出由本轮最终回复给出，避免把会随 amend 改变的提交哈希写进提交正文。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、blocker、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-006.status` 为 `blocked`，未标记 passing。
+  - PASS 没有任何半成品步骤处于未记录状态：两个 blocker 均已记录。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 修复 `buildDispatchPool`：automatic `pending_review` reviewer pool 应过滤 dependency blocker，受影响 feature 只出现在 blockers 中，不出现在 decisions 中。
+  - 添加 pending_review blocked/missing/cyclic dependency 回归测试后重新执行 reviewer gate。
 
 ### Session 2026-05-14 HT-006 coder implementation
 

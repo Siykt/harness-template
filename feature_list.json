@@ -296,7 +296,7 @@
     {
       "id": "HT-006",
       "title": "使用 DAG 支持并行执行",
-      "status": "pending_review",
+      "status": "blocked",
       "priority": 6,
       "dependsOn": [
         "HT-005"
@@ -324,9 +324,20 @@
           "date": "2026-05-14",
           "command": "pnpm agent -- --runner dispatcher --dry-run",
           "result": "PASS: dispatcher reported runner=coder readyPool=HT-006 maxConcurrency=2, dependency status HT-006 dependsOn=[HT-005:passing], and generated a coder plan without creating a dry-run worktree."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "reviewer acceptance: static inspection + pnpm exec tsc --noEmit + pnpm test + pnpm build + pnpm agent -- --runner dispatcher --dry-run + direct buildDispatchPool dependency-blocker probe",
+          "result": "BLOCKED: buildDispatchPool reports dependency blockers for pending_review features but still schedules those same features in the automatic reviewer pool. Reproduction with HT-002 pending_review depending on blocked HT-001 returned decisions=[HT-002] and blockers=[HT-002: dependency HT-001 is blocked], violating HT-006's rule that missing, cyclic, or blocked dependencies must prevent affected features from starting. Existing tests do not cover this pending_review dependency-blocker path."
         }
       ],
-      "notes": "Implemented DAG dispatcher planning for pending review: dependsOn defaults to [], missing/blocked/cyclic dependencies become explicit blockers, ready not_started features form a max-concurrency coder pool, pending_review features form a reviewer pool, and dispatcher dry-run prints ready pool plus dependency status."
+      "blocker": {
+        "date": "2026-05-14",
+        "cause": "Automatic pending_review reviewer pool ignores dependency blockers.",
+        "evidence": "NODE_ENV=test pnpm exec tsx -e direct buildDispatchPool probe returned runner=reviewer, decisions=[HT-002], blockers=[HT-002: dependency HT-001 is blocked] for a pending_review feature depending on a blocked feature.",
+        "restartInstructions": "Filter pending_review candidates with dependencyReason before scheduling reviewer decisions; ensure blocker output remains deterministic; add a regression test where a pending_review feature has a blocked, missing, or cyclic dependency and is not selected; rerun pnpm exec tsc --noEmit, pnpm test, pnpm build, and pnpm agent -- --runner dispatcher --dry-run."
+      },
+      "notes": "Reviewer blocked HT-006. DAG planning handles not_started dependency blockers, but pending_review features with dependency blockers can still be scheduled into reviewer pool; fix automatic reviewer candidate filtering before acceptance."
     }
   ]
 }
