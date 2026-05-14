@@ -5,12 +5,66 @@
 - 仓库根目录：使用 `pwd` 验证为项目根路径
 - 标准启动路径：`pnpm dev`
 - 标准验证路径：`pnpm test`（当前实际执行为 `vue-tsc -b && vitest`）
-- 当前最高优先级未完成功能：`HT-005` pending_review，等待 reviewer acceptance
+- 当前最高优先级未完成功能：`HT-006` not_started，等待启动 DAG parallel dispatcher
 - 当前唯一 active feature：`无`
 - 当前 blocker：`无`
-- 最近完成：`HT-005` coder 实现完成并进入 pending_review；`HT-004` reviewer 验收通过，runner preflight/context cache 进入 passing
+- 最近完成：`HT-005` reviewer 验收通过，worktree runner/status owner 进入 passing；`HT-004` reviewer 验收通过，runner preflight/context cache 进入 passing
 
 ## 会话记录
+
+### Session 2026-05-14 HT-005 reviewer acceptance
+
+- 日期：2026-05-14
+- 本轮目标：按 `docs/plans/plan-2026-05-14-reviewer-003.md` 对 `HT-005` 做 strict reviewer acceptance gate；若可接受，将状态从 `pending_review` 更新为 `passing` 并记录 evidence。
+- 启动与上下文：
+  - `pwd`：`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：`4fbb371`、`0a60a2f`、`64ec792`、`5de2340`、`0437f28`
+  - `./init.sh`：PASS，最终输出含 `Test Files  1 passed (1)`、`Tests  18 passed (18)`、`pnpm    dev`
+  - Layer 1：选定唯一 active review feature `HT-005`，当前状态 `pending_review`。
+  - Layer 2：读取 `docs/features/HT-005-worktree-runner-status-owner.md`；同时读取用户指定的 `docs/plans/plan-2026-05-14-reviewer-003.md` 作为完整执行 prompt/context。
+- 已完成：
+  - 审查 `agent.ts`：确认 run-scoped worktree 规划/创建、plan 镜像到 worktree、provider cwd 使用 worktree、result.json 校验、patch 回写、blocked 保留和成功清理路径。
+  - 审查 `agent.ts`：确认子 runner prompt 禁止直接落库 `feature_list.json` / `claude-progress.md`，由主 checkout 的 `agent.ts` 统一更新状态与进度。
+  - 审查 `tests/setup.test.ts`：确认覆盖 worktree path/result JSON path、runner recommendedStatus 边界、blocked blocker 字段要求和 prompt 状态 owner 约束。
+  - 更新 `feature_list.json`：将 `HT-005.status` 从 `pending_review` 改为 `passing`，追加 reviewer acceptance evidence。
+  - 更新 `claude-progress.md`：记录本轮 reviewer 验收、验证、rubric 和 clean-state checklist。
+- 运行过的验证：
+  - `./init.sh`：PASS；`Test Files  1 passed (1)`、`Tests  18 passed (18)`。
+  - `pnpm test`：PASS；`Test Files  1 passed (1)`、`Tests  18 passed (18)`。
+  - `pnpm exec tsc --noEmit`：PASS，exit 0，无错误输出。
+  - `pnpm build`：PASS；输出末行 `ESM ⚡️ Build success in 4ms`。
+  - `pnpm agent -- --runner dispatcher --dry-run`：PASS；自动选择 `HT-005 -> reviewer`，输出 reviewer worktree、resultJson 和 statusOwner。
+  - `rg "Execution worktree|Result JSON|must not directly update feature_list|Result JSON schema|statusOwner" docs/plans/plan-2026-05-14-reviewer-004.md`：PASS；生成 plan 含执行 worktree、result JSON schema 和 status owner 约束。
+  - `test ! -e .harness/worktrees/2026-05-14T133055-369Z-HT-005-reviewer && echo 'PASS no dry-run worktree'`：PASS，确认 dry-run 未创建永久 worktree。
+  - `git worktree add --detach .harness/worktrees/manual-review-smoke-HT-005 HEAD && git worktree remove --force .harness/worktrees/manual-review-smoke-HT-005 && git worktree prune`：PASS，输出含 `PASS worktree create/remove`。
+- 基础 smoke/e2e 路径检查：
+  - `./init.sh` PASS；dispatcher dry-run PASS，且生成的 reviewer plan 证明 HT-005 runner 路径包含 worktree/result JSON/status owner 信息。
+- 更新过的文件或工件：
+  - `feature_list.json`：`HT-005` reviewer 验收通过，状态更新为 `passing`，追加 review evidence。
+  - `claude-progress.md`：记录本轮 reviewer 验收、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。
+  - 本轮 reviewer 未启动真实长时 provider；验收依据为静态审查、单测、build、dispatcher dry-run、生成 plan 检查和 git worktree smoke。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，实现符合 HT-005：provider runner 在 run-scoped worktree 中执行，result.json handoff 受 schema/status 边界约束，主 checkout 统一落库。
+  - 验证：2/2，已运行 init、test、tsc、build、dispatcher dry-run、generated plan grep、dry-run worktree absence check 和 git worktree create/remove smoke。
+  - 范围纪律：2/2，本轮仅做 reviewer 检查并更新 tracker/progress 文件，未修改生产代码。
+  - 可靠性：2/2，worktree/result path 由 run id 决定；失败或 blocked 保留 worktree；成功后清理；patch 回写先执行 `git apply --check`。
+  - 可维护性：2/2，worktree helpers、result schema validation、prompt contract 和测试边界清晰。
+  - 交接准备度：2/2，`HT-005` 已进入 passing，下一轮可启动 `HT-006`。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后 3 行含 `Tests  18 passed (18)`、`pnpm    dev`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 4ms`。
+  - PASS 本轮变更已 git commit：提交已创建；最终 `git log --oneline -1` 输出见本轮最终回复。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-005.status` 已更新为 `passing`，`HT-006.status` 仍为 `not_started`。
+  - PASS 没有任何半成品步骤处于未记录状态：无 blocker；真实 provider 长时运行未执行，已记录 reviewer 验收依据。
+  - PASS 下一轮会话无需人工修复即可继续：下一步启动 `HT-006` DAG parallel dispatcher。
+- 下一步最佳动作：
+  - 启动 `HT-006`：实现 DAG 依赖选择和并行 dispatcher，建立在 HT-005 worktree/status-owner 隔离基础上。
+
 
 ### Session 2026-05-14 HT-005 coder implementation
 

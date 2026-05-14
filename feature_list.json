@@ -268,7 +268,7 @@
     {
       "id": "HT-005",
       "title": "使用 Git Worktree 执行 Agent Runner 并集中状态更新",
-      "status": "pending_review",
+      "status": "passing",
       "priority": 5,
       "dependsOn": [],
       "layer2_refs": [
@@ -284,9 +284,14 @@
           "date": "2026-05-14",
           "command": "pnpm exec tsc --noEmit + pnpm test + pnpm build + pnpm agent -- --runner dispatcher --dry-run + dry-run worktree existence check + git worktree create/remove smoke",
           "result": "PASS: implemented HT-005 worktree runner/status-owner path. TypeScript passed; vitest passed 18 tests covering worktree naming, result JSON validation, and status-owner prompt constraints; build succeeded; dispatcher dry-run printed worktree path, result JSON path, and agent.ts status owner; dry-run did not create the planned worktree; git worktree add/remove under .harness/worktrees succeeded."
+        },
+        {
+          "date": "2026-05-14",
+          "command": "reviewer acceptance: static inspection + ./init.sh + pnpm test + pnpm exec tsc --noEmit + pnpm build + pnpm agent -- --runner dispatcher --dry-run + generated plan grep + dry-run worktree absence check + git worktree create/remove smoke",
+          "result": "PASS: reviewer accepted HT-005. agent.ts creates run-scoped worktrees for provider runners, mirrors plans into the execution worktree, requires and validates result.json, restricts coder/reviewer recommended statuses, applies non-tracker worktree patches back to the main checkout with git apply --check, excludes feature_list.json and claude-progress.md from child patch replay, and centralizes tracker/progress finalization in agent.ts. Vitest passed 18 tests; TypeScript, build, dispatcher dry-run, generated plan grep, dry-run worktree absence, and manual git worktree create/remove smoke all passed."
         }
       ],
-      "notes": "Implementation pending reviewer acceptance. agent.ts now plans/creates run-scoped git worktrees for provider runners, mirrors the plan into the execution worktree, requires result.json handoff, validates runner-recommended statuses, applies worktree patches back to the main checkout, and centralizes feature_list/claude-progress finalization in the dispatcher."
+      "notes": "Reviewer accepted HT-005. Worktree execution, result.json handoff, status-owner boundaries, patch replay exclusions, blocked preservation policy, dry-run behavior, and tests are sufficient for passing. Next feature can be HT-006 DAG parallel dispatcher."
     },
     {
       "id": "HT-006",
