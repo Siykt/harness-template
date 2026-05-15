@@ -11,8 +11,8 @@ import {
   formatProviderCommand,
   resolveAgentProvider,
   type AgentProviderId
-} from './agent-providers';
-import { buildFeatureAgentDryRunPrompt, validateChoreCommitMessage, writeFeatureSpec } from './feature-agent';
+} from './agent/nodejs/agent-providers';
+import { buildFeatureAgentDryRunPrompt, validateChoreCommitMessage, writeFeatureSpec } from './agent/nodejs/feature-agent';
 
 interface FeatureSummary {
   id: string;

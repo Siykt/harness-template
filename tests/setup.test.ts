@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { agentProviderIds, buildProviderCommand } from '../agent-providers';
+import { agentProviderIds, buildProviderCommand } from '../agent/nodejs/agent-providers';
 import {
   buildDispatchPool,
   buildPrompt,
@@ -22,7 +22,7 @@ import {
   validateChoreCommitMessage,
   validateFeatureSpecConsistency,
   writeFeatureSpec
-} from '../feature-agent';
+} from '../agent/nodejs/feature-agent';
 
 type ToCliOptionsInput = Parameters<typeof toCliOptions>[0];
 
