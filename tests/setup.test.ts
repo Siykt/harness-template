@@ -1,11 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { agentProviderIds, buildProviderCommand } from '../agent/nodejs/agent-providers';
 import {
   buildDispatchPool,
   buildPrompt,
+  createRunnerWorktree,
   extractCurrentStatusAndLatestSession,
   planRunnerWorktree,
   readCachedContextSummary,
@@ -462,6 +464,27 @@ describe('runner context cache and preflight prompt', () => {
     );
     expect(worktree.cleanupPolicy).toContain('dry-run');
     expect(worktree.cleanupPolicy).toContain('blocked');
+  });
+
+  it('creates runner worktrees without sharing the main node_modules directory', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runner-worktree-'));
+    try {
+      expect(spawnSync('git', ['init'], { cwd }).status).toBe(0);
+      expect(spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd }).status).toBe(0);
+      expect(spawnSync('git', ['config', 'user.name', 'Test User'], { cwd }).status).toBe(0);
+      writeFileSync(join(cwd, 'README.md'), '# test\n', 'utf8');
+      expect(spawnSync('git', ['add', 'README.md'], { cwd }).status).toBe(0);
+      expect(spawnSync('git', ['commit', '-m', 'init'], { cwd }).status).toBe(0);
+      mkdirSync(join(cwd, 'node_modules'));
+
+      const worktree = planRunnerWorktree(cwd, 'run-HT-007-coder');
+      createRunnerWorktree(cwd, worktree);
+
+      expect(existsSync(join(worktree.path, 'node_modules'))).toBe(false);
+      expect(existsSync(dirname(worktree.resultJsonPath))).toBe(true);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it('validates runner result JSON and enforces runner-owned status transitions', () => {

@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { type ArgsDef, defineCommand, parseArgs as parseCittyArgs, type ParsedArgs, runMain } from 'citty';
@@ -737,9 +737,6 @@ function createRunnerWorktree(cwd: string, worktree: RunnerWorktree): void {
     throw new Error(`Failed to create runner worktree at ${worktree.path}:\n${result.stdout}\n${result.stderr}`);
   }
 
-  const mainNodeModules = resolve(cwd, 'node_modules');
-  const worktreeNodeModules = join(worktree.path, 'node_modules');
-  if (existsSync(mainNodeModules) && !existsSync(worktreeNodeModules)) symlinkSync(mainNodeModules, worktreeNodeModules, 'dir');
   ensureDir(join(worktree.path, '.harness/runs', worktree.runId));
 }
 
@@ -1843,6 +1840,7 @@ export {
   buildPrompt,
   buildProviderInstruction,
   buildDispatchPool,
+  createRunnerWorktree,
   extractCurrentStatusAndLatestSession,
   planRunnerWorktree,
   readCachedContextSummary,

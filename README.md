@@ -142,6 +142,8 @@ python3 -m agent --task "Implement the next feature" --dry-run
 
 Coder / reviewer runner 会在 `.harness/worktrees/<run-id>` 下创建独立 Git worktree。生成的 plan 会同步到该 worktree，provider 也在这个隔离目录中执行，避免多个 agent 共享同一个工作目录。
 
+Runner worktree 不共享主工作树的 `node_modules`。这样 worktree 内的 `./init.sh` / `pnpm install` 会按 lockfile 自己准备依赖，不会尝试重置主 checkout 的依赖目录。
+
 子 agent 不直接落库 `feature_list.json` 状态或 `claude-progress.md` 最终进度，而是在 `.harness/runs/<run-id>/result.json` 写入建议状态、验证证据和 blocker 信息。`agent.ts` 校验 result JSON 后，把非 tracker 文件的 patch 应用回主工作树，再统一更新功能状态和进度日志。成功的 worktree 会清理；失败或 blocked 的 worktree 会保留用于排查。
 
 ## DAG 并发调度

@@ -8,9 +8,66 @@
 - 当前最高优先级未完成功能：无；`feature_list.json` 中登记功能均为 `passing`
 - 当前唯一 active feature：`无`
 - 当前 blocker：无
-- 最近完成：`README.md` 已同步最新功能说明；`HT-005` worktree runner/status owner 与 `HT-006` DAG dispatcher 均已反映到文档
+- 最近完成：`HT-007` 已修复 runner worktree 共享 `node_modules` 导致 pnpm/init 卡死的风险
 
 ## 会话记录
+
+### Session 2026-05-15 HT-007 worktree node_modules isolation
+
+- 日期：2026-05-15
+- 本轮目标：修复用户发现的 git worktree runner 共享 `node_modules` 后，pnpm 在 worktree 内尝试重置依赖并导致 `init.sh` 卡死的风险。
+- 启动与上下文：
+  - `pwd`：PASS，`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：PASS，最新提交包含 `2070bd1 chore: reorganize agent and feature agent files into nodejs directory`、`3a61964 docs: update README with latest features`
+  - `./init.sh`：PASS，主工作树 init 完成，输出含 `Test Files  1 passed (1)`、`Tests  23 passed (23)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：开始时所有登记 feature 均为 `passing`；本轮登记并选定唯一 active fix `HT-007`。
+  - Layer 2：读取 `docs/features/HT-005-worktree-runner-status-owner.md`，因为本轮修改直接触及 runner worktree 生命周期。
+- Blocker 记录：
+  - 用户报告：git worktree 会导致 pnpm 尝试重置 `node_modules`，进而让 `init.sh` 卡死。
+  - 根因定位：`createRunnerWorktree` 在 runner worktree 中 symlink 主工作树 `node_modules`，使 worktree 内 pnpm 操作暴露到同一份依赖目录。
+- 已完成：
+  - 修改 `agent.ts`：移除 runner worktree 创建时的 `node_modules` symlink 逻辑，并移除不再使用的 `symlinkSync` import。
+  - 修改 `tests/setup.test.ts`：新增回归测试，在主工作树存在 `node_modules` 时创建 runner worktree，断言 worktree 内没有 `node_modules`，且 result JSON 目录仍被创建。
+  - 新增 `docs/features/HT-007-worktree-node-modules-isolation.md`：记录需求、验收项和验证命令。
+  - 更新 `feature_list.json`：登记 `HT-007`，状态为 `passing`，依赖 `HT-005`，并记录本轮 evidence。
+  - 更新 `README.md`：说明 runner worktree 不共享主工作树 `node_modules`。
+- 运行过的验证：
+  - `./init.sh`：PASS，主工作树 init 完成，`Test Files  1 passed (1)`、`Tests  23 passed (23)`。
+  - `pnpm test`：PASS，`Test Files  1 passed (1)`、`Tests  24 passed (24)`。
+  - `pnpm exec tsc --noEmit`：PASS，exit 0。
+  - `temporary git worktree + CI=true ./init.sh`：PASS，临时 worktree 创建后输出 `node_modules_exists_before=false`，worktree 内 `init_exit=0`，并完成 `Test Files  1 passed (1)`、`Tests  23 passed (23)`。
+  - `pnpm build`：PASS，输出末行 `ESM ⚡️ Build success in 5ms`。
+- 基础 smoke/e2e 路径检查：
+  - 主工作树 `./init.sh`、`pnpm test`、`pnpm build` 均 PASS。
+  - 真实临时 worktree 内 `CI=true ./init.sh` PASS，覆盖本轮故障路径。
+- 更新过的文件或工件：
+  - `agent.ts`：移除 worktree `node_modules` 共享逻辑。
+  - `tests/setup.test.ts`：新增 worktree dependency isolation 回归测试。
+  - `docs/features/HT-007-worktree-node-modules-isolation.md`：新增 feature spec。
+  - `feature_list.json`：新增 `HT-007` passing evidence。
+  - `README.md`：补充 worktree 不共享 `node_modules` 的说明。
+  - `claude-progress.md`：记录本轮修改、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 无 blocker。代价是 runner worktree 首次 init 可能需要独立安装依赖，但不会触碰主工作树 `node_modules`。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，已移除共享 `node_modules` 的根因，并用真实 worktree smoke 验证 init 可完成。
+  - 验证：2/2，已运行 `./init.sh`、`pnpm test`、`pnpm exec tsc --noEmit`、真实 worktree `./init.sh`、`pnpm build`。
+  - 范围纪律：2/2，修改集中在 runner worktree 生命周期、对应测试和文档/状态记录。
+  - 可靠性：2/2，新增回归测试锁定主工作树存在 `node_modules` 时 worktree 不共享依赖目录。
+  - 可维护性：2/2，修复是删除脆弱共享机制，README 和 feature spec 记录了行为边界。
+  - 交接准备度：2/2，`HT-007` 有 feature spec、evidence 和清晰验证路径。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后输出含 `Test Files  1 passed (1)`、`Tests  23 passed (23)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 5ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入后执行；最终 `git log --oneline -1` 输出由本轮最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-007.status` 为 `passing`，evidence 已记录。
+  - PASS 没有任何半成品步骤处于未记录状态：本轮无未完成实现项或 blocker。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 后续如需优化速度，可单独设计 pnpm store/cache 策略，但不要恢复 worktree 对主 `node_modules` 的共享。
 
 ### Session 2026-05-14 README latest feature sync
 

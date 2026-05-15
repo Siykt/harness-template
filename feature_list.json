@@ -1,6 +1,6 @@
 {
   "project": "harness-template",
-  "last_updated": "2026-05-14",
+  "last_updated": "2026-05-15",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -422,6 +422,46 @@
         }
       ],
       "notes": "Blocked reviewer finding fixed: automatic pending_review reviewer pool now excludes features with dependency blockers, so affected features appear only in blockers and are not launched. HT-006 is ready for reviewer re-check."
+    },
+    {
+      "id": "HT-007",
+      "title": "隔离 Runner Worktree 的 node_modules",
+      "status": "passing",
+      "priority": 7,
+      "dependsOn": [
+        "HT-005"
+      ],
+      "layer2_refs": [
+        "docs/features/HT-007-worktree-node-modules-isolation.md"
+      ],
+      "evidence": [
+        {
+          "date": "2026-05-15",
+          "command": "./init.sh",
+          "result": "PASS: main checkout init completed with Test Files 1 passed (1), Tests 23 passed (23)."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "pnpm test",
+          "result": "PASS: vitest run completed with Test Files 1 passed (1), Tests 24 passed (24), including regression coverage that runner worktrees do not share the main node_modules directory."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript type check completed with exit 0."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "temporary git worktree + CI=true ./init.sh",
+          "result": "PASS: temporary worktree reported node_modules_exists_before=false and init_exit=0; worktree init completed with Test Files 1 passed (1), Tests 23 passed (23)."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 5ms."
+        }
+      ],
+      "notes": "Removed the runner worktree node_modules symlink. Worktrees now start without a shared node_modules directory, so pnpm can install/verify from the lockfile without resetting the main checkout dependencies."
     }
   ]
 }
