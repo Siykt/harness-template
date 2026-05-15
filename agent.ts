@@ -52,8 +52,10 @@ interface CommandResult {
 
 interface DispatcherRunResult {
   decision?: DispatchDecision;
+  decisions?: DispatchDecision[];
   exitCode: number;
   previousStatus?: string;
+  previousStatuses?: Record<string, string>;
   stopReason?: 'blocked' | 'no_work';
 }
 
@@ -83,6 +85,14 @@ interface RunnerResult {
     restartInstructions: string;
   };
   notes?: string[];
+}
+
+interface HarnessRunResult {
+  exitCode: number;
+  worktree: RunnerWorktree;
+  feature?: FeatureSummary;
+  runner: ProviderRunnerMode;
+  finalized?: RunnerResult;
 }
 
 type ContextSummaryKind = 'agents' | 'contextGate' | 'featureList' | 'featureDoc';
@@ -1525,8 +1535,9 @@ async function runHarness(
   cwd: string,
   runnerConfig: RunnerConfig,
   selectedFeatureOverride?: FeatureSummary,
-  taskOverride?: string
-): Promise<number> {
+  taskOverride?: string,
+  finalize = true
+): Promise<HarnessRunResult> {
   const context = loadRunContext(opts, cwd, runnerConfig.runner, selectedFeatureOverride);
   const worktree = planRunnerWorktree(cwd, context.runId);
   const baseTask = taskOverride ?? opts.task;
@@ -1582,7 +1593,7 @@ async function runHarness(
     console.log(`[agent.ts] plan=${relative(cwd, planPath)}`);
     console.log(`[agent.ts] command=${formatProviderCommand(providerCommand)}`);
     console.log('\nPrompt written to the plan file above. Re-run without --dry-run to launch the selected provider.');
-    return 0;
+    return { exitCode: 0, worktree, feature: context.selectedFeature, runner: runnerConfig.runner };
   }
 
   if (context.initFailed) {
@@ -1591,7 +1602,7 @@ async function runHarness(
     );
     console.error(`[agent.ts] plan=${relative(cwd, planPath)}`);
     console.error(`[agent.ts] preflight=${relative(cwd, context.preflightEvidencePath)}`);
-    return 1;
+    return { exitCode: 1, worktree, feature: context.selectedFeature, runner: runnerConfig.runner };
   }
 
   createRunnerWorktree(cwd, worktree);
@@ -1607,19 +1618,21 @@ async function runHarness(
   const exitCode = await spawnAgentProvider(providerCommand.command, providerCommand.args, worktree.path);
   if (exitCode !== 0) {
     console.error(`[agent.ts] runner exited with code ${exitCode}; preserving worktree ${relative(cwd, worktree.path)}`);
-    return exitCode;
+    return { exitCode, worktree, feature: context.selectedFeature, runner: runnerConfig.runner };
   }
 
   if (!context.selectedFeature) throw new Error('Runner completed without a selected feature.');
+  if (!finalize) return { exitCode: 0, worktree, feature: context.selectedFeature, runner: runnerConfig.runner };
+
   const result = finalizeRunnerResult(cwd, worktree, context.selectedFeature, runnerConfig.runner);
   if (result.recommendedStatus === 'blocked') {
     console.error(`[agent.ts] runner recommended blocked; preserving worktree ${relative(cwd, worktree.path)}`);
-    return 1;
+    return { exitCode: 1, worktree, feature: context.selectedFeature, runner: runnerConfig.runner, finalized: result };
   }
 
   removeRunnerWorktree(cwd, worktree);
   console.log(`[agent.ts] finalized ${result.featureId} -> ${result.recommendedStatus}`);
-  return 0;
+  return { exitCode: 0, worktree, feature: context.selectedFeature, runner: runnerConfig.runner, finalized: result };
 }
 
 async function runDispatcherOnce(opts: CliOptions, cwd: string, iteration?: number): Promise<DispatcherRunResult> {
@@ -1670,19 +1683,35 @@ async function runDispatcherOnce(opts: CliOptions, cwd: string, iteration?: numb
     console.log(`[agent.ts] dispatch planned: ${decision.reason} -> ${decision.runner}`);
   }
 
+  const dispatcherInit = opts.skipInit ? undefined : run('./init.sh', [], cwd, 180_000);
+  if (dispatcherInit && dispatcherInit.exitCode !== 0) {
+    const exitCode = dispatcherInit.exitCode ?? 1;
+    console.error('[agent.ts] dispatcher preflight ./init.sh failed; no runner worktrees will be launched.');
+    console.error(tailLines(`${dispatcherInit.stdout}\n${dispatcherInit.stderr}`, 80));
+    return {
+      decision: pool.decisions[0],
+      decisions: pool.decisions,
+      exitCode,
+      previousStatus: pool.decisions[0]?.feature.status,
+      previousStatuses: Object.fromEntries(pool.decisions.map(decision => [decision.feature.id, decision.feature.status]))
+    };
+  }
+
   const runDecision = async (decision: DispatchDecision) => {
     const dispatchOpts = {
       ...opts,
-      feature: decision.feature.id
+      feature: decision.feature.id,
+      skipInit: true
     };
-    const exitCode = await runHarness(
+    const harnessResult = await runHarness(
       dispatchOpts,
       cwd,
       runnerDefaults(dispatchOpts, decision.runner),
       decision.feature,
-      decision.task
+      decision.task,
+      opts.dryRun
     );
-    return { decision, exitCode };
+    return { decision, ...harnessResult };
   };
 
   const results = opts.dryRun
@@ -1696,10 +1725,30 @@ async function runDispatcherOnce(opts: CliOptions, cwd: string, iteration?: numb
   }
 
   const failed = results.find(result => result.exitCode !== 0);
+  if (!opts.dryRun && !failed) {
+    for (const result of results) {
+      if (!result.feature) throw new Error(`Runner completed without a selected feature for ${result.decision.feature.id}.`);
+      const finalized = finalizeRunnerResult(cwd, result.worktree, result.feature, result.runner);
+      result.finalized = finalized;
+      if (finalized.recommendedStatus === 'blocked') {
+        console.error(`[agent.ts] runner recommended blocked; preserving worktree ${relative(cwd, result.worktree.path)}`);
+        result.exitCode = 1;
+        break;
+      }
+
+      removeRunnerWorktree(cwd, result.worktree);
+      console.log(`[agent.ts] finalized ${finalized.featureId} -> ${finalized.recommendedStatus}`);
+    }
+  }
+
+  const finalizationFailed = results.find(result => result.exitCode !== 0);
+  const previousStatuses = Object.fromEntries(pool.decisions.map(decision => [decision.feature.id, decision.feature.status]));
   return {
     decision: pool.decisions[0],
-    exitCode: failed?.exitCode ?? 0,
-    previousStatus: pool.decisions[0]?.feature.status
+    decisions: pool.decisions,
+    exitCode: failed?.exitCode ?? finalizationFailed?.exitCode ?? 0,
+    previousStatus: pool.decisions[0]?.feature.status,
+    previousStatuses
   };
 }
 
@@ -1727,29 +1776,31 @@ async function runDispatcherLoop(opts: CliOptions, cwd: string): Promise<number>
       return 0;
     }
 
-    const decision = result.decision;
-    if (!decision) return 1;
+    const decisions = result.decisions ?? (result.decision ? [result.decision] : []);
+    if (decisions.length === 0) return 1;
 
-    const updatedFeature = featureById(readFeatureSummaries(), decision.feature.id);
-    if (!updatedFeature) {
-      console.error(`[agent.ts] dispatcher loop stopped: feature disappeared after run: ${decision.feature.id}`);
-      return 1;
-    }
-    if (updatedFeature.status === 'blocked') {
-      console.error(`[agent.ts] dispatcher loop stopped: feature became blocked: ${updatedFeature.id}`);
-      return 1;
-    }
-    if (updatedFeature.status === result.previousStatus) {
-      console.error(
-        `[agent.ts] dispatcher loop stopped: feature status did not change after successful run: ${updatedFeature.id} status=${updatedFeature.status}`
-      );
-      console.error('[agent.ts] This guard prevents repeatedly dispatching the same unfinished state.');
-      return 1;
-    }
+    const updatedFeatures = readFeatureSummaries();
+    for (const decision of decisions) {
+      const updatedFeature = featureById(updatedFeatures, decision.feature.id);
+      const previousStatus = result.previousStatuses?.[decision.feature.id] ?? result.previousStatus;
+      if (!updatedFeature) {
+        console.error(`[agent.ts] dispatcher loop stopped: feature disappeared after run: ${decision.feature.id}`);
+        return 1;
+      }
+      if (updatedFeature.status === 'blocked') {
+        console.error(`[agent.ts] dispatcher loop stopped: feature became blocked: ${updatedFeature.id}`);
+        return 1;
+      }
+      if (updatedFeature.status === previousStatus) {
+        console.error(
+          `[agent.ts] dispatcher loop stopped: feature status did not change after successful run: ${updatedFeature.id} status=${updatedFeature.status}`
+        );
+        console.error('[agent.ts] This guard prevents repeatedly dispatching the same unfinished state.');
+        return 1;
+      }
 
-    console.log(
-      `[agent.ts] dispatcher loop transition: ${updatedFeature.id} ${result.previousStatus} -> ${updatedFeature.status}`
-    );
+      console.log(`[agent.ts] dispatcher loop transition: ${updatedFeature.id} ${previousStatus} -> ${updatedFeature.status}`);
+    }
     if (delayMs > 0) await sleep(delayMs);
   }
 }
@@ -1812,8 +1863,8 @@ async function runWithOptions(opts: CliOptions) {
     process.exit(await runFeatureAgent(opts, cwd));
   }
 
-  const exitCode = await runHarness(opts, cwd, runnerDefaults(opts, opts.runner));
-  process.exit(exitCode);
+  const result = await runHarness(opts, cwd, runnerDefaults(opts, opts.runner));
+  process.exit(result.exitCode);
 }
 
 const main = defineCommand({

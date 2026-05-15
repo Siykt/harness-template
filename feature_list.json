@@ -458,10 +458,50 @@
         {
           "date": "2026-05-15",
           "command": "pnpm build",
-          "result": "PASS: tsup ESM build success in 5ms."
+          "result": "PASS: tsup ESM build success in 4ms."
         }
       ],
       "notes": "Removed the runner worktree node_modules symlink. Worktrees now start without a shared node_modules directory, so pnpm can install/verify from the lockfile without resetting the main checkout dependencies."
+    },
+    {
+      "id": "HT-008",
+      "title": "修复 Dispatcher 并发 Finalize 竞争",
+      "status": "passing",
+      "priority": 8,
+      "dependsOn": [
+        "HT-006"
+      ],
+      "layer2_refs": [
+        "docs/features/HT-008-dispatcher-parallel-finalization.md"
+      ],
+      "evidence": [
+        {
+          "date": "2026-05-15",
+          "command": "./init.sh",
+          "result": "PASS: init completed with Test Files 1 passed (1), Tests 24 passed (24)."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "pnpm exec tsc --noEmit",
+          "result": "PASS: TypeScript type check completed with exit 0 after splitting provider execution from dispatcher finalization."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "pnpm test",
+          "result": "PASS: vitest run completed with Test Files 1 passed (1), Tests 24 passed (24)."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "pnpm agent -- --runner dispatcher --dry-run --max-concurrency 3",
+          "result": "PASS: current all-passing queue reported no ready not_started or pending_review features and exited 0."
+        },
+        {
+          "date": "2026-05-15",
+          "command": "pnpm build",
+          "result": "PASS: tsup ESM build success in 5ms."
+        }
+      ],
+      "notes": "Dispatcher now runs provider worktrees concurrently but defers feature_list/claude-progress updates and patch replay to a serial finalization pass in the main checkout. Dispatcher loop status guards also inspect every decision in the batch."
     }
   ]
 }

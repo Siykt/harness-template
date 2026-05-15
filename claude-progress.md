@@ -8,9 +8,64 @@
 - 当前最高优先级未完成功能：无；`feature_list.json` 中登记功能均为 `passing`
 - 当前唯一 active feature：`无`
 - 当前 blocker：无
-- 最近完成：`HT-007` 已修复 runner worktree 共享 `node_modules` 导致 pnpm/init 卡死的风险
+- 最近完成：`HT-008` 已修复 dispatcher 并发 runner finalize 竞争
 
 ## 会话记录
+
+### Session 2026-05-15 HT-008 dispatcher parallel finalization
+
+- 日期：2026-05-15
+- 本轮目标：修复 dispatcher 并行实现中多个 runner 同时 finalize、竞争写主工作树状态文件的 bug。
+- 启动与上下文：
+  - `pwd`：PASS，`/Users/apple/Documents/projects/harness-template`
+  - 已读取 `CONTEXT-GATE.md`
+  - `git log --oneline -5`：PASS，最新提交包含 `4638a9b fix: isolate runner worktree dependencies`、`2070bd1 chore: reorganize agent and feature agent files into nodejs directory`
+  - `./init.sh`：PASS，最后输出含 `Test Files  1 passed (1)`、`Tests  24 passed (24)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - Layer 1：开始时所有登记 feature 均为 `passing`；本轮登记并选定唯一 active fix `HT-008`。
+- Blocker 记录：
+  - 用户指出：当前并行只有一个 worktree 或并行语义不成立。
+  - 根因定位：`buildDispatchPool` 会产生多个 decision，非 dry-run 也使用 `Promise.all`，但每个并发 `runHarness()` 会立即调用 `finalizeRunnerResult()`，导致主工作树 patch 回放、`feature_list.json` 和 `claude-progress.md` 存在并发写竞争；loop guard 也只检查第一个 decision。
+- 已完成：
+  - 修改 `agent.ts`：`runHarness` 返回 `HarnessRunResult`，支持 provider 执行完成后暂不 finalize。
+  - 修改 dispatcher：非 dry-run 仍用 `Promise.all` 并发执行 runner worktree/provider；所有 provider 成功后，再按 pool 顺序串行调用 `finalizeRunnerResult()`、清理成功 worktree。
+  - 修改 dispatcher loop guard：检查本轮所有 decisions 的状态变化，而不是只检查第一个 feature。
+  - 修改 dispatcher preflight：每轮 dispatcher 先运行一次主工作树 `./init.sh`，子 runner 使用 `skipInit: true`，避免并发 runner 重复跑主工作树 init。
+  - 新增 `docs/features/HT-008-dispatcher-parallel-finalization.md` 并更新 `README.md`，说明并发执行、串行落库语义。
+  - 更新 `feature_list.json`：登记 `HT-008` 为 `passing` 并记录 evidence。
+- 运行过的验证：
+  - `./init.sh`：PASS，`Test Files  1 passed (1)`、`Tests  24 passed (24)`。
+  - `pnpm exec tsc --noEmit`：PASS，exit 0。
+  - `pnpm test`：PASS，`Test Files  1 passed (1)`、`Tests  24 passed (24)`。
+  - `pnpm agent -- --runner dispatcher --dry-run --max-concurrency 3`：PASS，当前全 passing 队列报告 no ready work 并退出 0。
+  - `pnpm build`：PASS，输出末行 `ESM ⚡️ Build success in 4ms`。
+- 基础 smoke/e2e 路径检查：
+  - 主工作树 `./init.sh`、`pnpm test`、`pnpm build` 均 PASS；dispatcher dry-run no-work path PASS。
+- 更新过的文件或工件：
+  - `agent.ts`：拆分并发 provider 执行与串行 finalization，修复 loop guard 与 dispatcher init 策略。
+  - `docs/features/HT-008-dispatcher-parallel-finalization.md`：新增 bugfix feature spec。
+  - `feature_list.json`：新增 `HT-008` passing evidence。
+  - `README.md`：说明真实并发运行与串行落库边界。
+  - `claude-progress.md`：记录本轮修改、验证、rubric 和 clean-state checklist。
+- 已知风险或未解决问题：
+  - 当前验证没有启动真实外部 provider 并发写 result JSON；代码路径已通过类型检查和现有 dispatcher/pool 测试，下一步可补一个 mock provider e2e 来模拟多个 result JSON。
+- 评审评分（读取 `evaluator-rubric.md` 后执行）：
+  - 正确性：2/2，并发 runner 不再直接写主状态文件，dispatcher 改为并发执行、串行汇总。
+  - 验证：2/2，已运行 `./init.sh`、`pnpm exec tsc --noEmit`、`pnpm test`、dispatcher dry-run、`pnpm build`。
+  - 范围纪律：2/2，修改集中在 dispatcher 并发/finalize 路径和对应文档状态。
+  - 可靠性：2/2，状态写入竞争点被收敛到单线程 finalization；loop guard 覆盖整批 decisions。
+  - 可维护性：2/2，`HarnessRunResult` 明确区分 provider 执行结果与 finalized result。
+  - 交接准备度：2/2，`HT-008` spec/evidence/README 说明了并发语义。
+  - 结论：Accept。
+- Clean-state checklist（读取 `clean-state-checklist.md` 后执行）：
+  - PASS 标准启动路径仍然可用：`./init.sh` 最后输出含 `Test Files  1 passed (1)`、`Tests  24 passed (24)`、`如果希望 init.sh 直接启动应用，请设置 RUN_START_COMMAND=1。`
+  - PASS `pnpm build` 通过：输出末行 `ESM ⚡️ Build success in 4ms`。
+  - PENDING 本轮变更已 git commit：提交将在本记录写入后执行；最终 `git log --oneline -1` 输出由本轮最终回复给出。
+  - PASS 当前进度已记录到进度日志：本 session 记录包含修改了什么、为什么、验证、rubric 和下一步。
+  - PASS 功能状态真实反映 passing 和未验证边界：`feature_list.json` 中 `HT-008.status` 为 `passing`，evidence 已记录。
+  - PASS 没有任何半成品步骤处于未记录状态：本轮无未完成实现项或 blocker。
+  - PASS 下一轮会话无需人工修复即可继续：下一步见下方。
+- 下一步最佳动作：
+  - 可新增 mock provider e2e，模拟两个 ready features 同时写 result JSON，验证主工作树最终串行汇总两个结果。
 
 ### Session 2026-05-15 HT-007 worktree node_modules isolation
 

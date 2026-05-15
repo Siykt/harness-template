@@ -146,6 +146,8 @@ Runner worktree 不共享主工作树的 `node_modules`。这样 worktree 内的
 
 子 agent 不直接落库 `feature_list.json` 状态或 `claude-progress.md` 最终进度，而是在 `.harness/runs/<run-id>/result.json` 写入建议状态、验证证据和 blocker 信息。`agent.ts` 校验 result JSON 后，把非 tracker 文件的 patch 应用回主工作树，再统一更新功能状态和进度日志。成功的 worktree 会清理；失败或 blocked 的 worktree 会保留用于排查。
 
+Dispatcher 并发模式下，多个 runner worktree 可以同时执行 provider；所有 provider 成功返回后，主工作树会按 dispatcher pool 顺序串行汇总 result JSON、回放 patch、更新 tracker 和进度日志，避免多个 runner 同时写 `feature_list.json` 或 `claude-progress.md`。
+
 ## DAG 并发调度
 
 `feature_list.json` 的 feature 可以声明 `dependsOn`：
@@ -160,7 +162,7 @@ Runner worktree 不共享主工作树的 `node_modules`。这样 worktree 内的
 
 `dependsOn` 缺省时按空数组处理。Dispatcher 会先检测依赖缺失、依赖 blocked 和循环依赖；有依赖 blocker 的 feature 不会进入执行池。
 
-自动调度时，dispatcher 会优先选择依赖已满足的 `pending_review` feature 进入 reviewer 池；如果没有 reviewer work，则选择所有 `not_started` 且依赖已全部 `passing` 的 feature 进入 coder 池，并按 `--max-concurrency` 截断本轮并发数量。`--dry-run` 会打印 ready pool、依赖状态和计划路径，不创建永久 worktree。
+自动调度时，dispatcher 会优先选择依赖已满足的 `pending_review` feature 进入 reviewer 池；如果没有 reviewer work，则选择所有 `not_started` 且依赖已全部 `passing` 的 feature 进入 coder 池，并按 `--max-concurrency` 截断本轮并发数量。`--dry-run` 会按顺序打印 ready pool、依赖状态和计划路径，不创建永久 worktree；真实运行会并发启动这些 worktree，并在全部 provider 完成后串行落库。
 
 ## 上下文加载协议
 
